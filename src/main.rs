@@ -1,5 +1,7 @@
 use eframe::egui;
 use egui_plot::{Legend, Line, Plot, PlotPoints};
+use std::collections::VecDeque;
+use std::time::Duration;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions::default();
@@ -41,69 +43,112 @@ struct Sample {
     u: f32,
 }
 
-struct SimulationResult {
-    samples: Vec<Sample>,
-    spike_times: Vec<f32>,
+struct LiveSimulation {
+    window_samples: usize,
+    t: f32,
+    v: f32,
+    u: f32,
+    samples: VecDeque<Sample>,
+    spike_times: VecDeque<f32>,
 }
 
 struct NeuronApp {
     params: NeuronParams,
-    simulation: SimulationResult,
+    simulation: LiveSimulation,
+    running: bool,
+    target_fps: f32,
+    steps_per_frame: u32,
 }
 
 impl Default for NeuronApp {
     fn default() -> Self {
         let params = NeuronParams::default();
-        let simulation = simulate(&params);
+        let simulation = LiveSimulation::new(&params);
 
-        Self { params, simulation }
+        Self {
+            params,
+            simulation,
+            running: true,
+            target_fps: 30.0,
+            steps_per_frame: 4,
+        }
     }
 }
 
 impl eframe::App for NeuronApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let mut needs_resimulate = false;
+        let mut needs_reset = false;
 
         egui::Panel::left("controls")
             .resizable(false)
             .default_size(280.0)
             .show_inside(ui, |ui| {
                 ui.heading("Izhikevich Controls");
-                ui.label("Adjust the model parameters and rerun the RK4 simulation.");
+                ui.label("Adjust the model parameters and watch the RK4 simulation evolve live.");
 
                 ui.separator();
 
-                needs_resimulate |= slider(ui, "a", &mut self.params.a, 0.001, 0.2);
-                needs_resimulate |= slider(ui, "b", &mut self.params.b, 0.01, 0.5);
-                needs_resimulate |= slider(ui, "c", &mut self.params.c, -80.0, -40.0);
-                needs_resimulate |= slider(ui, "d", &mut self.params.d, 0.0, 20.0);
-                needs_resimulate |= slider(ui, "dt (ms)", &mut self.params.dt, 0.01, 2.0);
-                needs_resimulate |= slider(ui, "Input current", &mut self.params.input_current, 0.0, 50.0);
-                needs_resimulate |= slider(ui, "Duration (ms)", &mut self.params.duration, 20.0, 1000.0);
+                needs_reset |= slider(ui, "a", &mut self.params.a, 0.001, 0.2);
+                needs_reset |= slider(ui, "b", &mut self.params.b, 0.01, 0.5);
+                needs_reset |= slider(ui, "c", &mut self.params.c, -80.0, -40.0);
+                needs_reset |= slider(ui, "d", &mut self.params.d, 0.0, 20.0);
+                needs_reset |= slider(ui, "dt (ms)", &mut self.params.dt, 0.01, 2.0);
+                needs_reset |= slider(ui, "Input current", &mut self.params.input_current, 0.0, 50.0);
+                needs_reset |= slider(ui, "Window (ms)", &mut self.params.duration, 20.0, 1000.0);
+                needs_reset |= slider(ui, "Update FPS", &mut self.target_fps, 1.0, 120.0);
+                needs_reset |= slider(ui, "Steps / frame", &mut self.steps_per_frame, 1, 25);
 
                 ui.separator();
 
-                if ui.button("Run simulation").clicked() {
-                    needs_resimulate = true;
-                }
+                ui.horizontal(|ui| {
+                    if ui
+                        .button(if self.running { "Pause" } else { "Resume" })
+                        .clicked()
+                    {
+                        self.running = !self.running;
+                    }
 
+                    if ui.button("Reset").clicked() {
+                        needs_reset = true;
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Status:");
+                    ui.label(if self.running {
+                        "running"
+                    } else {
+                        "paused"
+                    });
+                });
+
+                ui.label(format!("Live time: {:.2} ms", self.simulation.t));
                 ui.label(format!("Samples: {}", self.simulation.samples.len()));
                 ui.label(format!("Spikes: {}", self.simulation.spike_times.len()));
 
-                if let Some(last_spike) = self.simulation.spike_times.last() {
+                if let Some(last_spike) = self.simulation.spike_times.back() {
                     ui.label(format!("Last spike: {:.2} ms", last_spike));
                 } else {
                     ui.label("Last spike: none");
                 }
 
-                if let Some(last) = self.simulation.samples.last() {
+                if let Some(last) = self.simulation.samples.back() {
                     ui.label(format!("Final V: {:.2} mV", last.v));
                     ui.label(format!("Final u: {:.2}", last.u));
                 }
             });
 
-        if needs_resimulate {
-            self.simulation = simulate(&self.params);
+        if needs_reset {
+            self.simulation = LiveSimulation::new(&self.params);
+            self.running = true;
+        }
+
+        if self.running {
+            for _ in 0..self.steps_per_frame {
+                self.simulation.step(&self.params);
+            }
+            ui.ctx()
+                .request_repaint_after(Duration::from_secs_f32(1.0 / self.target_fps.max(1.0)));
         }
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
@@ -136,41 +181,71 @@ impl eframe::App for NeuronApp {
     }
 }
 
-fn slider(ui: &mut egui::Ui, label: &str, value: &mut f32, min: f32, max: f32) -> bool {
-    ui.add(egui::Slider::new(value, min..=max).text(label)).changed()
-}
+impl LiveSimulation {
+    fn new(params: &NeuronParams) -> Self {
+        let v = -65.0_f32;
+        let u = params.b * v;
+        let window_samples = ((params.duration / params.dt.max(0.001)).ceil() as usize).max(2) + 1;
 
-fn simulate(params: &NeuronParams) -> SimulationResult {
-    let mut samples = Vec::new();
-    let mut spike_times = Vec::new();
+        let mut simulation = Self {
+            window_samples,
+            t: 0.0,
+            v,
+            u,
+            samples: VecDeque::with_capacity(window_samples),
+            spike_times: VecDeque::new(),
+        };
 
-    let mut t = 0.0_f32;
-    let mut v = -65.0_f32;
-    let mut u = params.b * v;
+        simulation.samples.push_back(Sample { t: 0.0, v, u });
 
-    samples.push(Sample { t, v, u });
-
-    let dt = params.dt.max(0.001);
-    let total_steps = (params.duration / dt).ceil() as usize;
-
-    for _ in 0..total_steps {
-        let (next_v, next_u) = rk4_step(v, u, params, dt);
-        t += dt;
-
-        v = next_v;
-        u = next_u;
-
-        if v >= 30.0 {
-            samples.push(Sample { t, v: 30.0, u });
-            spike_times.push(t);
-            v = params.c;
-            u += params.d;
+        while simulation.t < params.duration {
+            simulation.step(params);
         }
 
-        samples.push(Sample { t, v, u });
+        simulation
     }
 
-    SimulationResult { samples, spike_times }
+    fn step(&mut self, params: &NeuronParams) {
+        let dt = params.dt.max(0.001);
+        let (next_v, next_u) = rk4_step(self.v, self.u, params, dt);
+
+        self.t += dt;
+        self.v = next_v;
+        self.u = next_u;
+
+        if self.v >= 30.0 {
+            self.samples.push_back(Sample {
+                t: self.t,
+                v: 30.0,
+                u: self.u,
+            });
+            self.spike_times.push_back(self.t);
+            self.v = params.c;
+            self.u += params.d;
+        }
+
+        self.samples.push_back(Sample {
+            t: self.t,
+            v: self.v,
+            u: self.u,
+        });
+
+        while self.samples.len() > self.window_samples {
+            self.samples.pop_front();
+        }
+
+        let window_start = self.samples.front().map(|sample| sample.t).unwrap_or(self.t);
+        while self.spike_times.front().is_some_and(|spike_time| *spike_time < window_start) {
+            self.spike_times.pop_front();
+        }
+    }
+}
+
+fn slider<T>(ui: &mut egui::Ui, label: &str, value: &mut T, min: T, max: T) -> bool
+where
+    T: egui::emath::Numeric,
+{
+    ui.add(egui::Slider::new(value, min..=max).text(label)).changed()
 }
 
 fn rk4_step(v: f32, u: f32, params: &NeuronParams, dt: f32) -> (f32, f32) {
