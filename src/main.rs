@@ -57,15 +57,17 @@ impl eframe::App for NeuronApp {
 
                 ui.separator();
 
-                needs_reset |= slider(ui, "a", &mut self.params.a, 0.001, 0.2);
-                needs_reset |= slider(ui, "b", &mut self.params.b, 0.01, 0.5);
-                needs_reset |= slider(ui, "c", &mut self.params.c, -80.0, -40.0);
-                needs_reset |= slider(ui, "d", &mut self.params.d, 0.0, 20.0);
-                needs_reset |= slider(ui, "dt (ms)", &mut self.params.dt, 0.01, 2.0);
-                needs_reset |= slider(ui, "Input current", &mut self.params.input_current, 0.0, 50.0);
-                needs_reset |= slider(ui, "Window (ms)", &mut self.params.duration, 20.0, 1000.0);
-                needs_reset |= slider(ui, "Update FPS", &mut self.target_fps, 1.0, 120.0);
-                needs_reset |= slider(ui, "Steps / frame", &mut self.steps_per_frame, 1, 25);
+                slider(ui, "a", &mut self.params.a, 0.001, 0.2);
+                slider(ui, "b", &mut self.params.b, 0.01, 0.5);
+                slider(ui, "c", &mut self.params.c, -80.0, -40.0);
+                slider(ui, "d", &mut self.params.d, 0.0, 20.0);
+                slider(ui, "dt (ms)", &mut self.params.dt, 0.01, 2.0);
+                slider(ui, "Input current", &mut self.params.input_current, 0.0, 50.0);
+                if slider(ui, "Window (ms)", &mut self.params.duration, 20.0, 1000.0) {
+                    self.simulation.window_samples = ((self.params.duration / self.params.dt.max(0.001)).ceil() as usize).max(2) + 1;
+                }
+                slider(ui, "Update FPS", &mut self.target_fps, 1.0, 120.0);
+                slider(ui, "Steps / frame", &mut self.steps_per_frame, 1, 25);
 
                 ui.separator();
 
