@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui_plot::{Legend, Line, Plot, PlotPoints};
+use egui_plot::{Legend, Line, Plot, Points, PlotPoints};
 use std::time::Duration;
 use image::load_from_memory;
 
@@ -21,7 +21,6 @@ fn main() -> eframe::Result<()> {
                 width: 512,
                 height: 512,
             },
-            // std::sync::Arc::new(include_bytes!("../assets/icon.png")),
         ),
         ..Default::default()
     };
@@ -42,6 +41,7 @@ struct NeuronApp {
     plot_height: Option<f32>,
     target_fps: f32,
     steps_per_frame: u32,
+    show_points: bool,
 }
 
 impl Default for NeuronApp {
@@ -56,6 +56,7 @@ impl Default for NeuronApp {
             plot_height: Some(260.0),
             target_fps: 30.0,
             steps_per_frame: 4,
+            show_points: false,
         }
     }
 }
@@ -97,9 +98,11 @@ impl eframe::App for NeuronApp {
                         ui.label("Using 32-bit floating-point arithmetic for simulation.");
                     }
                     &mut izh::NeuralModel::FixedPoint { ref mut bit_width, ref mut q_width } => {
-                        slider(ui, "Bit Width", bit_width, 8_usize, 64_usize);
-                        slider(ui, "Q Width", q_width, 1_usize, *bit_width);
+                        slider(ui, "Bit Width", bit_width, 8_usize, 32_usize);
+                        slider(ui, "Q Width", q_width, 1_usize, *bit_width - 4);
                         ui.label(format!("Using fixed-point arithmetic with bit width {} and Q width {}.", bit_width, q_width));
+                        ui.label(format!("Largest integer representable: {}", (1 << (*bit_width - *q_width - 1)) - 1));
+                        ui.label(format!("Least significant bit value: {}", 1.0 / (1 << *q_width) as f64));
                     }
                 }
 
@@ -116,6 +119,8 @@ impl eframe::App for NeuronApp {
                 }
                 slider(ui, "Update FPS", &mut self.target_fps, 1.0, 120.0);
                 slider(ui, "Steps / frame", &mut self.steps_per_frame, 1, 25);
+
+                ui.checkbox(&mut self.show_points, "Show points");
 
                 ui.separator();
 
@@ -159,7 +164,6 @@ impl eframe::App for NeuronApp {
 
         if needs_reset {
             self.simulation = LiveSimulation::new(&self.params, self.simulation.model);
-            self.running = true;
         }
 
         if self.running {
@@ -183,7 +187,7 @@ impl eframe::App for NeuronApp {
                 ui.heading("Membrane Potential");
             });
 
-            let voltage_points = PlotPoints::from_iter(
+            let voltage_trace = PlotPoints::from_iter(
                 self.simulation
                     .history
                     .iter()
@@ -199,7 +203,11 @@ impl eframe::App for NeuronApp {
                 .link_axis(shared_axis_group, shared_x_axes)
                 .y_axis_label("voltage (mV)")
                 .show(ui, |plot_ui| {
-                    plot_ui.line(Line::new("Membrane Potential", voltage_points));
+                    if self.show_points {
+                        plot_ui.points(Points::new("Membrane Potential", voltage_trace).radius(2.0)); // Add points to the plot
+                    } else {
+                        plot_ui.line(Line::new("Membrane Potential", voltage_trace));
+                    }
                 });
                     // });
 
@@ -251,7 +259,11 @@ impl eframe::App for NeuronApp {
                 .x_axis_label("time (ms)")
                 .y_axis_label("u (a.u.)")
                 .show(ui, |plot_ui| {
-                    plot_ui.line(Line::new("Recovery variable", recovery_points));
+                    if self.show_points {
+                        plot_ui.points(Points::new("Recovery variable", recovery_points).radius(2.0)); // Add points to the plot
+                    } else {
+                        plot_ui.line(Line::new("Recovery variable", recovery_points));
+                    }
                 });
         });
     }
