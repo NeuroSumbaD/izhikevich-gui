@@ -1,14 +1,30 @@
 use eframe::egui;
 use egui_plot::{Legend, Line, Plot, PlotPoints};
 use std::time::Duration;
+use image::load_from_memory;
 
-// mod qmath;
+mod qmath;
 mod izh;
 
 use izh::{NeuronParams, LiveSimulation};
 
 fn main() -> eframe::Result<()> {
-    let options = eframe::NativeOptions::default();
+
+    let icon_bytes = include_bytes!("../assets/icon.png");
+    let icon_image = load_from_memory(icon_bytes).expect("Failed to load icon image").to_rgba8();
+
+    let options = eframe::NativeOptions{
+
+        viewport: egui::ViewportBuilder::default().with_icon(
+            egui::IconData{
+                rgba: icon_image.into_raw(),
+                width: 512,
+                height: 512,
+            },
+            // std::sync::Arc::new(include_bytes!("../assets/icon.png")),
+        ),
+        ..Default::default()
+    };
     eframe::run_native(
         "Izhikevich Neuron Visualizer",
         options,
@@ -31,7 +47,7 @@ struct NeuronApp {
 impl Default for NeuronApp {
     fn default() -> Self {
         let params = NeuronParams::default();
-        let simulation = LiveSimulation::new(&params);
+        let simulation = LiveSimulation::new(&params, izh::NeuralModel::FloatingPoint);
 
         Self {
             params,
@@ -54,6 +70,38 @@ impl eframe::App for NeuronApp {
             .show_inside(ui, |ui| {
                 ui.heading("Izhikevich Controls");
                 ui.label("Adjust the model parameters and watch the RK4 simulation evolve live.");
+
+                ui.separator();
+
+                egui::ComboBox::from_label("Model Type")
+                    .selected_text(if let izh::NeuralModel::FixedPoint { bit_width, q_width } = self.simulation.model {
+                        format!("Fixed Point Q{}.{}", bit_width, q_width).to_string()
+                    } else {
+                        "Floating Point".to_string()
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.simulation.model,
+                            izh::NeuralModel::FloatingPoint,
+                            "Floating Point",
+                        );
+                        ui.selectable_value(
+                            &mut self.simulation.model,
+                            izh::NeuralModel::FixedPoint { bit_width: 32, q_width: 16 },
+                            "Fixed Point (32-bit, Q16)",
+                        );
+                    });
+
+                match &mut self.simulation.model {
+                    izh::NeuralModel::FloatingPoint => {
+                        ui.label("Using 32-bit floating-point arithmetic for simulation.");
+                    }
+                    &mut izh::NeuralModel::FixedPoint { ref mut bit_width, ref mut q_width } => {
+                        slider(ui, "Bit Width", bit_width, 8_usize, 64_usize);
+                        slider(ui, "Q Width", q_width, 1_usize, *bit_width);
+                        ui.label(format!("Using fixed-point arithmetic with bit width {} and Q width {}.", bit_width, q_width));
+                    }
+                }
 
                 ui.separator();
 
@@ -110,7 +158,7 @@ impl eframe::App for NeuronApp {
             });
 
         if needs_reset {
-            self.simulation = LiveSimulation::new(&self.params);
+            self.simulation = LiveSimulation::new(&self.params, self.simulation.model);
             self.running = true;
         }
 

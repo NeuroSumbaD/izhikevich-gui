@@ -11,7 +11,7 @@
 
 use std::ops::{Mul, Add, Sub, Div};
 
-
+#[derive(Debug, Clone, Copy)]
 pub struct FixedPoint {
     bit_width: usize,
     q_width: usize,
@@ -80,7 +80,7 @@ impl Mul for FixedPoint {
     fn mul(self, rhs: Self) -> Self::Output {
         let new_bit_width = self.bit_width + rhs.bit_width;
         let new_q_width = self.q_width + rhs.q_width;
-        let new_value = (self.value * rhs.value);
+        let new_value = self.value * rhs.value;
         Self {
             bit_width: new_bit_width,
             q_width: new_q_width,
@@ -98,7 +98,7 @@ impl Div for FixedPoint {
         let new_q_width = self.q_width + rhs.q_width;
 
         let scale_factor = 1 << (new_q_width - self.q_width) as i64;
-        let new_value = (self.value * scale_factor / rhs.value);
+        let new_value = self.value * scale_factor / rhs.value;
         Self {
             bit_width: new_bit_width,
             q_width: new_q_width,
@@ -108,9 +108,9 @@ impl Div for FixedPoint {
 }
 
 impl FixedPoint{
-    pub fn new(bit_width: usize, q_width: usize, value: f64) -> Self {
+    pub fn new<T: Into<f64>>(bit_width: usize, q_width: usize, value: T) -> Self {
         let scale_factor = 1 << q_width;
-        let fixed_value = (value * scale_factor as f64).round() as i64;
+        let fixed_value = (value.into() * scale_factor as f64).round() as i64;
         Self {
             bit_width,
             q_width,
@@ -118,11 +118,18 @@ impl FixedPoint{
         }
     }
 
-    pub fn truncate(&mut self, new_bit_width: usize, new_q_width: usize) {
+    pub fn truncate(&mut self, new_bit_width: usize, new_q_width: usize) -> Self {
         let scale_factor = 1 << new_q_width;
         let new_value = (self.value * scale_factor as i64) >> self.q_width;
         self.bit_width = new_bit_width;
         self.q_width = new_q_width;
         self.value = new_value;
+        *self
+    }
+
+    pub fn to_f32(&self) -> f32 {
+        let scale_factor = 1 << self.q_width;
+        let full_result: f64 = (self.value as f64) / (scale_factor as f64);
+        full_result as f32
     }
 }
