@@ -7,15 +7,16 @@
 
 use std::collections::VecDeque;
 
+use serde::{Serialize, Deserialize};
 use crate::qmath::FixedPoint;
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Serialize, Deserialize, Clone, Copy)]
 pub enum NeuralModel {
     FloatingPoint,
     FixedPoint { bit_width: usize, q_width: usize },
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub struct NeuronParams {
     pub a: f32,
     pub b: f32,
@@ -58,13 +59,14 @@ impl QParams {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct NeuralState {
     pub t: f32,
     pub v: f32,
     pub u: f32,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
 pub struct LiveSimulation {
     pub window_samples: usize,
     pub state: NeuralState,

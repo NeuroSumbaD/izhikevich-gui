@@ -6,6 +6,7 @@ use image::load_from_memory;
 mod qmath;
 mod izh;
 
+use serde::{Serialize, Deserialize};
 use izh::{NeuronParams, LiveSimulation};
 
 fn main() -> eframe::Result<()> {
@@ -27,13 +28,13 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Izhikevich Neuron Visualizer",
         options,
-        Box::new(|_cc| Ok(Box::new(NeuronApp::default()))),
+        Box::new(|cc| Ok(Box::new(NeuronApp::new(cc)))),
     )
 }
 
 
 
-
+#[derive(Serialize, Deserialize, Clone)]
 struct NeuronApp {
     params: NeuronParams,
     simulation: LiveSimulation,
@@ -42,6 +43,19 @@ struct NeuronApp {
     target_fps: f32,
     steps_per_frame: u32,
     show_points: bool,
+}
+
+impl NeuronApp {
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let neuron_params = cc.storage
+            .and_then(|storage| eframe::get_value(storage, eframe::APP_KEY))
+            .unwrap_or_default();
+
+        Self { 
+            params: neuron_params,
+            ..Default::default()
+         }
+    }
 }
 
 impl Default for NeuronApp {
@@ -204,9 +218,9 @@ impl eframe::App for NeuronApp {
                 .y_axis_label("voltage (mV)")
                 .show(ui, |plot_ui| {
                     if self.show_points {
-                        plot_ui.points(Points::new("Membrane Potential", voltage_trace).radius(2.0)); // Add points to the plot
+                        plot_ui.points(Points::new("Neuron 1", voltage_trace).radius(2.0)); // Add points to the plot
                     } else {
-                        plot_ui.line(Line::new("Membrane Potential", voltage_trace));
+                        plot_ui.line(Line::new("Neuron 1", voltage_trace));
                     }
                 });
                     // });
@@ -260,12 +274,16 @@ impl eframe::App for NeuronApp {
                 .y_axis_label("u (a.u.)")
                 .show(ui, |plot_ui| {
                     if self.show_points {
-                        plot_ui.points(Points::new("Recovery variable", recovery_points).radius(2.0)); // Add points to the plot
+                        plot_ui.points(Points::new("Neuron 1", recovery_points).radius(2.0)); // Add points to the plot
                     } else {
-                        plot_ui.line(Line::new("Recovery variable", recovery_points));
+                        plot_ui.line(Line::new("Neuron 1", recovery_points));
                     }
                 });
         });
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, eframe::APP_KEY, &self.params);
     }
 }
 
