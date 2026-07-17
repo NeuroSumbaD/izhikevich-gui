@@ -136,8 +136,8 @@ impl FixedPoint{
 
     /// truncate a fixed-point number to a smaller bit width and Q width
     pub fn truncate(&mut self, new_bit_width: usize, new_q_width: usize) -> Self {
-        if self.bit_width <= new_bit_width || self.q_width <= new_q_width {
-            panic!("New bit width and Q width must be smaller than the current ones.");
+        if new_bit_width >= self.bit_width && new_q_width >= self.q_width {
+            panic!("New bit width or Q width must be smaller than the current ones. Current: bit_width={}, q_width={}. New: bit_width={}, q_width={}", self.bit_width, self.q_width, new_bit_width, new_q_width);
         }
         let shift_amount = self.q_width - new_q_width;
         let new_value = self.value >> shift_amount;

@@ -185,15 +185,15 @@ fn q_step(v: f32, u: f32, params: &NeuronParams, bit_width: usize, q_width: usiz
     let w_const = FixedPoint::new(bit_width, q_width, 140.0);
 
     let v_s1 = (v_q * x_const).truncate(bit_width, q_width);
-    let v_s2 = v_s1 + y_const;
+    let v_s2 = (v_s1 + y_const).truncate(bit_width, q_width);
     let v_s3 = (v_s2 * v_q).truncate(bit_width, q_width);
-    let v_s4 = params_q.input_current + w_const + v_s3 - u_q;
-    let v_next = (v_s4 * params_q.dt).truncate(bit_width, q_width) + v_q;
+    let v_s4 = (params_q.input_current + w_const + v_s3 - u_q).truncate(bit_width, q_width);
+    let v_next = ((v_s4 * params_q.dt).truncate(bit_width, q_width) + v_q).truncate(bit_width, q_width);
 
     let u_s1 = (v_q * params_q.b).truncate(bit_width, q_width);
-    let u_s2 = u_s1 - u_q;
+    let u_s2 = (u_s1 - u_q).truncate(bit_width, q_width);
     let u_s3 = (params_q.a * u_s2).truncate(bit_width, q_width);
-    let u_next = (u_s3 * params_q.dt).truncate(bit_width, q_width) + u_q;
+    let u_next = ((u_s3 * params_q.dt).truncate(bit_width, q_width) + u_q).truncate(bit_width, q_width);
 
     (v_next.to_f32(), u_next.to_f32())
 }
