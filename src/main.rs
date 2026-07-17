@@ -4,7 +4,9 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 fn main() -> eframe::Result<()> {
-    let options = eframe::NativeOptions::default();
+    let mut options = eframe::NativeOptions::default();
+    options.viewport.title = Some("Izhikevich Neuron Visualizer".to_string());
+    options.viewport.maximized = Some(true);
     eframe::run_native(
         "Izhikevich Neuron Visualizer",
         options,
@@ -49,6 +51,7 @@ struct LiveSimulation {
     v: f32,
     u: f32,
     samples: VecDeque<Sample>,
+    euler_samples: VecDeque<Sample>,
     spike_times: VecDeque<f32>,
 }
 
@@ -56,6 +59,7 @@ struct NeuronApp {
     params: NeuronParams,
     simulation: LiveSimulation,
     running: bool,
+    show_euler: bool,
     target_fps: f32,
     steps_per_frame: u32,
 }
@@ -69,6 +73,7 @@ impl Default for NeuronApp {
             params,
             simulation,
             running: true,
+            show_euler: false,
             target_fps: 30.0,
             steps_per_frame: 4,
         }
@@ -99,6 +104,10 @@ impl eframe::App for NeuronApp {
                 needs_reset |= slider(ui, "Steps / frame", &mut self.steps_per_frame, 1, 25);
 
                 ui.separator();
+
+                // Show Euler step for comparison
+                let atoms = "Show Euler step";
+                ui.checkbox(&mut self.show_euler, atoms);
 
                 ui.horizontal(|ui| {
                     if ui
@@ -162,20 +171,40 @@ impl eframe::App for NeuronApp {
                 self.simulation.samples.iter().map(|sample| [sample.t as f64, sample.u as f64]),
             );
 
-            Plot::new("voltage_plot")
+            Plot::new("Membrane Voltage (mV)")
                 .legend(Legend::default())
                 .height(260.0)
                 .show(ui, |plot_ui| {
-                    plot_ui.line(Line::new("Membrane voltage (mV)", voltage_points));
+                    plot_ui.line(Line::new("RK4", voltage_points));
+
+                    // If Euler step is enabled
+                    if self.show_euler {
+                        let euler_points = PlotPoints::from_iter(
+                            self.simulation.euler_samples.iter().map(|sample| {
+                                [sample.t as f64, sample.v as f64]
+                            })
+                        );
+                        plot_ui.line(Line::new("Euler", euler_points).style(egui_plot::LineStyle::dashed_dense()));
+                    }
                 });
 
             ui.add_space(12.0);
 
-            Plot::new("recovery_plot")
+            Plot::new("Recovery variable u")
                 .legend(Legend::default())
                 .height(220.0)
                 .show(ui, |plot_ui| {
-                    plot_ui.line(Line::new("Recovery variable u", recovery_points));
+                    plot_ui.line(Line::new("RK4", recovery_points));
+
+                    // If Euler step is enabled
+                    if self.show_euler {
+                        let euler_points = PlotPoints::from_iter(
+                            self.simulation.euler_samples.iter().map(|sample| {
+                                [sample.t as f64, sample.u as f64]
+                            })
+                        );
+                        plot_ui.line(Line::new("Euler", euler_points).style(egui_plot::LineStyle::dashed_dense()));
+                    }
                 });
         });
     }
@@ -193,10 +222,12 @@ impl LiveSimulation {
             v,
             u,
             samples: VecDeque::with_capacity(window_samples),
+            euler_samples: VecDeque::with_capacity(window_samples),
             spike_times: VecDeque::new(),
         };
 
         simulation.samples.push_back(Sample { t: 0.0, v, u });
+        simulation.euler_samples.push_back(Sample { t: 0.0, v, u });
 
         while simulation.t < params.duration {
             simulation.step(params);
@@ -208,10 +239,12 @@ impl LiveSimulation {
     fn step(&mut self, params: &NeuronParams) {
         let dt = params.dt.max(0.001);
         let (next_v, next_u) = rk4_step(self.v, self.u, params, dt);
+        let euler_state = euler_step(self.v, self.u, params, dt);
 
         self.t += dt;
         self.v = next_v;
         self.u = next_u;
+        self.euler_samples.push_back(Sample { t: self.t, v: euler_state.0.min(30.0), u: euler_state.1 });
 
         if self.v >= 30.0 {
             self.samples.push_back(Sample {
@@ -232,6 +265,7 @@ impl LiveSimulation {
 
         while self.samples.len() > self.window_samples {
             self.samples.pop_front();
+            self.euler_samples.pop_front();
         }
 
         let window_start = self.samples.front().map(|sample| sample.t).unwrap_or(self.t);
@@ -246,6 +280,15 @@ where
     T: egui::emath::Numeric,
 {
     ui.add(egui::Slider::new(value, min..=max).text(label)).changed()
+}
+
+fn euler_step(v: f32, u: f32, params: &NeuronParams, dt: f32) -> (f32, f32) {
+    let (dv, du) = derivatives(v, u, params);
+
+    let next_v = v + dv * dt;
+    let next_u = u + du * dt;
+
+    (next_v, next_u)
 }
 
 fn rk4_step(v: f32, u: f32, params: &NeuronParams, dt: f32) -> (f32, f32) {
