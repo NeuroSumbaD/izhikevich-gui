@@ -23,6 +23,8 @@ pub struct NeuronParams {
     pub c: f32,
     pub d: f32,
     pub dt: f32,
+    pub model: NeuralModel,
+    pub num_neurons: usize,
     pub input_current: f32,
     pub duration: f32,
 }
@@ -35,6 +37,8 @@ impl Default for NeuronParams {
             c: -65.0,
             d: 8.0,
             dt: 0.25,
+            model: NeuralModel::FloatingPoint,
+            num_neurons: 1,
             input_current: 10.0,
             duration: 250.0,
         }
@@ -66,33 +70,39 @@ pub struct NeuralState {
     pub u: f32,
 }
 
+
+/// # LiveSimulation 
+/// Holds and manages the state of a simulation
+/// 
+/// Note that the parameters are external so they can be smoothly adjusted in
+/// real-time external to the simulation.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LiveSimulation {
     pub window_samples: usize,
-    pub state: NeuralState,
-    pub history: VecDeque<NeuralState>,
-    pub spike_times: VecDeque<f32>,
-    pub model: NeuralModel,
+    pub simulation_time: f32,
+    pub histories: Vec<VecDeque<NeuralState>>,
+    pub spike_times: Vec<VecDeque<f32>>,
 }
 
 
 impl LiveSimulation {
-    pub fn new(params: &NeuronParams, model: NeuralModel) -> Self {
+    pub fn new(params: &NeuronParams) -> Self {
         let v = -65.0_f32;
         let u = params.b * v;
         let window_samples = ((params.duration / params.dt.max(0.001)).ceil() as usize).max(2) + 1;
 
         let mut simulation = Self {
             window_samples,
-            state: NeuralState { t: 0.0, v, u },
-            history: VecDeque::with_capacity(window_samples),
-            spike_times: VecDeque::new(),
-            model: model,
+            simulation_time: 0.0,
+            histories: Vec::from_iter(std::iter::repeat_with(|| VecDeque::with_capacity(window_samples)).take(params.num_neurons)),
+            spike_times: Vec::from_iter(std::iter::repeat_with(|| VecDeque::new()).take(params.num_neurons)),
         };
 
-        simulation.history.push_back(NeuralState { t: 0.0, v, u });
+        for history in simulation.histories.iter_mut() {
+            history.push_back(NeuralState { t: 0.0, v, u });
+        }
 
-        while simulation.state.t < params.duration {
+        while simulation.simulation_time < params.duration {
             simulation.step(params);
         }
 
@@ -101,42 +111,51 @@ impl LiveSimulation {
 
     pub fn step(&mut self, params: &NeuronParams) {
         let dt = params.dt.max(0.001);
-        let (next_v, next_u) = 
-        match self.model {
-            NeuralModel::FloatingPoint => rk4_step(self.state.v, self.state.u, params, dt),
-            NeuralModel::FixedPoint { bit_width, q_width } => {
-                q_step(self.state.v, self.state.u, params,  bit_width, q_width)
+        self.simulation_time += dt;
+
+        for neuron in 0..params.num_neurons {
+            // Step each neuron
+            let state = self.histories[neuron].back().unwrap().clone();
+
+
+            let (next_v, next_u) = 
+                match params.model {
+                    NeuralModel::FloatingPoint => rk4_step(state.v, state.u, params, dt),
+                    NeuralModel::FixedPoint { bit_width, q_width } => {
+                        q_step(state.v, state.u, params,  bit_width, q_width)
+                    }
+                };
+
+            state.t += dt;
+            state.v = next_v;
+            state.u = next_u;
+
+            if self.state.v >= 30.0 {
+                self.history.push_back(NeuralState {
+                    t: self.state.t,
+                    v: 30.0,
+                    u: self.state.u,
+                });
+                self.spike_times.push_back(self.state.t);
+                self.state.v = params.c;
+                self.state.u += params.d;
             }
-        };
 
-        self.state.t += dt;
-        self.state.v = next_v;
-        self.state.u = next_u;
-
-        if self.state.v >= 30.0 {
             self.history.push_back(NeuralState {
                 t: self.state.t,
-                v: 30.0,
+                v: self.state.v,
                 u: self.state.u,
             });
-            self.spike_times.push_back(self.state.t);
-            self.state.v = params.c;
-            self.state.u += params.d;
-        }
 
-        self.history.push_back(NeuralState {
-            t: self.state.t,
-            v: self.state.v,
-            u: self.state.u,
-        });
+            while self.history.len() > self.window_samples {
+                self.history.pop_front();
+            }
 
-        while self.history.len() > self.window_samples {
-            self.history.pop_front();
-        }
+            let window_start = self.history.front().map(|sample| sample.t).unwrap_or(self.state.t);
+            while self.spike_times.front().is_some_and(|spike_time| *spike_time < window_start) {
+                self.spike_times.pop_front();
+            }
 
-        let window_start = self.history.front().map(|sample| sample.t).unwrap_or(self.state.t);
-        while self.spike_times.front().is_some_and(|spike_time| *spike_time < window_start) {
-            self.spike_times.pop_front();
         }
     }
 }

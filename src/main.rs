@@ -61,13 +61,13 @@ impl NeuronApp {
 impl Default for NeuronApp {
     fn default() -> Self {
         let params = NeuronParams::default();
-        let simulation = LiveSimulation::new(&params, izh::NeuralModel::FloatingPoint);
+        let simulation = LiveSimulation::new(&params);
 
         Self {
             params,
             simulation,
             running: true,
-            plot_height: Some(260.0),
+            plot_height: Some(500.0),
             target_fps: 30.0,
             steps_per_frame: 4,
             show_points: false,
@@ -91,25 +91,25 @@ impl eframe::App for NeuronApp {
                 ui.heading("Neural representation");
 
                 egui::ComboBox::from_label("Model Type")
-                    .selected_text(if let izh::NeuralModel::FixedPoint { bit_width, q_width } = self.simulation.model {
+                    .selected_text(if let izh::NeuralModel::FixedPoint { bit_width, q_width } = self.params.model {
                         format!("Fixed Point Q{}.{}", bit_width, q_width).to_string()
                     } else {
                         "Floating Point".to_string()
                     })
                     .show_ui(ui, |ui| {
                         ui.selectable_value(
-                            &mut self.simulation.model,
+                            &mut self.params.model,
                             izh::NeuralModel::FloatingPoint,
                             "Floating Point",
                         );
                         ui.selectable_value(
-                            &mut self.simulation.model,
+                            &mut self.params.model,
                             izh::NeuralModel::FixedPoint { bit_width: 32, q_width: 16 },
                             "Fixed Point (32-bit, Q16)",
                         );
                     });
 
-                match &mut self.simulation.model {
+                match &mut self.params.model {
                     izh::NeuralModel::FloatingPoint => {
                         ui.label("Using 32-bit floating-point arithmetic for simulation.");
                     }
@@ -131,7 +131,11 @@ impl eframe::App for NeuronApp {
                 slider(ui, "c", &mut self.params.c, -80.0, -40.0);
                 slider(ui, "d", &mut self.params.d, 0.0, 20.0);
                 slider(ui, "dt (ms)", &mut self.params.dt, 0.01, 2.0);
-                
+                if slider(ui, "Number of neurons:", &mut self.params.num_neurons, 1, 10) {
+                    needs_reset = true;
+                }
+
+                ui.label("View controls:");
                 if slider(ui, "Window (ms)", &mut self.params.duration, 20.0, 1000.0) {
                     self.simulation.window_samples = ((self.params.duration / self.params.dt.max(0.001)).ceil() as usize).max(2) + 1;
                 }
@@ -169,24 +173,11 @@ impl eframe::App for NeuronApp {
                     });
                 });
 
-                ui.label(format!("Live time: {:.2} ms", self.simulation.state.t));
-                ui.label(format!("Samples: {}", self.simulation.history.len()));
-                ui.label(format!("Spikes: {}", self.simulation.spike_times.len()));
-
-                if let Some(last_spike) = self.simulation.spike_times.back() {
-                    ui.label(format!("Last spike: {:.2} ms", last_spike));
-                } else {
-                    ui.label("Last spike: none");
-                }
-
-                if let Some(last) = self.simulation.history.back() {
-                    ui.label(format!("Final V: {:.2} mV", last.v));
-                    ui.label(format!("Final u: {:.2}", last.u));
-                }
+                ui.label(format!("Live time: {:.2} ms", self.simulation.simulation_time));                
             });
 
         if needs_reset {
-            self.simulation = LiveSimulation::new(&self.params, self.simulation.model);
+            self.simulation = LiveSimulation::new(&self.params);
         }
 
         if self.running {
