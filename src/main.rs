@@ -84,9 +84,11 @@ impl eframe::App for NeuronApp {
             .default_size(280.0)
             .show_inside(ui, |ui| {
                 ui.heading("Izhikevich Controls");
-                ui.label("Adjust the model parameters and watch the RK4 simulation evolve live.");
+                ui.label("Adjust the model parameters and watch the simulation evolve in real time.");
 
                 ui.separator();
+
+                ui.heading("Neural representation");
 
                 egui::ComboBox::from_label("Model Type")
                     .selected_text(if let izh::NeuralModel::FixedPoint { bit_width, q_width } = self.simulation.model {
@@ -122,12 +124,14 @@ impl eframe::App for NeuronApp {
 
                 ui.separator();
 
+                ui.heading("Neural Parameters");
+
                 slider(ui, "a", &mut self.params.a, 0.001, 0.2);
                 slider(ui, "b", &mut self.params.b, 0.01, 0.5);
                 slider(ui, "c", &mut self.params.c, -80.0, -40.0);
                 slider(ui, "d", &mut self.params.d, 0.0, 20.0);
                 slider(ui, "dt (ms)", &mut self.params.dt, 0.01, 2.0);
-                slider(ui, "Input current", &mut self.params.input_current, 0.0, 50.0);
+                
                 if slider(ui, "Window (ms)", &mut self.params.duration, 20.0, 1000.0) {
                     self.simulation.window_samples = ((self.params.duration / self.params.dt.max(0.001)).ceil() as usize).max(2) + 1;
                 }
@@ -135,6 +139,11 @@ impl eframe::App for NeuronApp {
                 slider(ui, "Steps / frame", &mut self.steps_per_frame, 1, 25);
 
                 ui.checkbox(&mut self.show_points, "Show points");
+
+                ui.separator();
+
+                ui.heading("Input stimulus");
+                slider(ui, "Input current", &mut self.params.input_current, 0.0, 50.0);
 
                 ui.separator();
 
