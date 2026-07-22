@@ -8,6 +8,9 @@
 use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
+use rand::rngs::SmallRng;
+use rand_distr::{Distribution, Normal};
+
 use crate::qmath::FixedPoint;
 
 #[derive(PartialEq, Serialize, Deserialize, Clone, Copy)]
@@ -27,12 +30,17 @@ pub struct NeuronParams {
     pub num_neurons: usize,
     pub input_currents: Vec<f32>,
     pub duration: f32,
+    pub noise_std_devs: Vec<f32>,
+    pub rng_seed: [u8; 32],
 }
 
 impl Default for NeuronParams {
     fn default() -> Self {
         let mut default_current: Vec<f32> = Vec::with_capacity(10);
         default_current.push(10.0);
+
+        let mut default_noise: Vec<f32> = Vec::with_capacity(10);
+        default_noise.push(0.0);
 
         Self {
             a: 0.02,
@@ -44,6 +52,8 @@ impl Default for NeuronParams {
             num_neurons: 1,
             input_currents: default_current,
             duration: 250.0,
+            noise_std_devs: default_noise,
+            rng_seed: [0; 32],
         }
     }
 }
@@ -87,7 +97,7 @@ pub struct LiveSimulation {
 
 
 impl LiveSimulation {
-    pub fn new(params: &NeuronParams) -> Self {
+    pub fn new(params: &NeuronParams, rng: &mut SmallRng) -> Self {
         let v = -65.0_f32;
         let u = params.b * v;
         let window_samples = ((params.duration / params.dt.max(0.001)).ceil() as usize).max(2) + 1;
@@ -104,22 +114,28 @@ impl LiveSimulation {
         }
 
         while simulation.simulation_time < params.duration {
-            simulation.step(params);
+            simulation.step(params, rng);
         }
 
         simulation
     }
 
-    pub fn step(&mut self, params: &NeuronParams) {
+    pub fn step(&mut self, params: &NeuronParams, rng: &mut SmallRng) {
         let dt = params.dt.max(0.001);
         self.simulation_time += dt;
 
         for (neuron, history) in self.histories.iter_mut().enumerate() {
             // Step each neuron
             let mut state = history.back().unwrap().clone();
-            let current = params.input_currents.get(neuron).copied().unwrap_or(0.0);
+            let mut current = params.input_currents.get(neuron).copied().unwrap_or(0.0);
+            let noise_std_dev = params.noise_std_devs.get(neuron).copied().unwrap_or(0.0);
             let spike_times = &mut self.spike_times[neuron];
 
+            // Add input noise to the current input
+            if noise_std_dev > 0.0 {
+                let noise: f32 = Normal::new(0.0, noise_std_dev).unwrap().sample(rng);
+                current += noise;
+            }
 
             let (next_v, next_u) = 
                 match params.model {

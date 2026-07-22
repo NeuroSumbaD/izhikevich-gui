@@ -2,11 +2,10 @@ use eframe::egui;
 use egui_plot::{Legend, Line, Plot, Points, PlotPoints};
 use std::time::Duration;
 use image::load_from_memory;
+use rand::{SeedableRng, rngs::SmallRng};
 
 mod qmath;
 mod izh;
-
-use serde::{Serialize, Deserialize};
 use izh::{NeuronParams, LiveSimulation};
 
 fn main() -> eframe::Result<()> {
@@ -34,7 +33,6 @@ fn main() -> eframe::Result<()> {
 
 
 
-#[derive(Serialize, Deserialize, Clone)]
 struct NeuronApp {
     params: NeuronParams,
     simulation: LiveSimulation,
@@ -43,19 +41,22 @@ struct NeuronApp {
     target_fps: f32,
     steps_per_frame: u32,
     show_points: bool,
+    rng: SmallRng,
 }
 
 impl NeuronApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let neuron_params = cc.storage
+        let neuron_params: NeuronParams = cc.storage
             .and_then(|storage| eframe::get_value(storage, eframe::APP_KEY))
             .unwrap_or_default();
 
-        let simulation = LiveSimulation::new(&neuron_params);
+        let mut rng = SmallRng::from_seed(neuron_params.rng_seed);
+        let simulation = LiveSimulation::new(&neuron_params, &mut rng);
 
         Self { 
             params: neuron_params,
             simulation: simulation,
+            rng: rng,
             ..Default::default()
          }
     }
@@ -64,7 +65,8 @@ impl NeuronApp {
 impl Default for NeuronApp {
     fn default() -> Self {
         let params = NeuronParams::default();
-        let simulation = LiveSimulation::new(&params);
+        let mut rng = SmallRng::from_seed(params.rng_seed);
+        let simulation = LiveSimulation::new(&params, &mut rng);
 
         Self {
             params,
@@ -74,6 +76,7 @@ impl Default for NeuronApp {
             target_fps: 30.0,
             steps_per_frame: 4,
             show_points: false,
+            rng: rng,
         }
     }
 }
@@ -155,11 +158,16 @@ impl eframe::App for NeuronApp {
                     self.params
                         .input_currents
                         .resize(self.params.num_neurons, 10.0);
+
+                    self.params
+                        .noise_std_devs
+                        .resize(self.params.num_neurons, 0.0);
                 }
                 
                 for (neuron, neuron_current) in self.params.input_currents.iter_mut().enumerate() {
-                    slider(ui, &format!("Neuron {} input current", neuron + 1),
-                        neuron_current, 0.0, 50.0);
+                    ui.label(format!("Neuron {}", neuron + 1));
+                    slider(ui, &"Input current (mA)", neuron_current, 0.0, 50.0);
+                    slider(ui, &"Noise std dev (mA)", &mut self.params.noise_std_devs[neuron], 0.0, 10.0);
                 }
 
                 ui.separator();
@@ -195,12 +203,14 @@ impl eframe::App for NeuronApp {
             });
 
         if needs_reset {
-            self.simulation = LiveSimulation::new(&self.params);
+            // Reset the rng with the same seed to ensure reproducibility
+            self.rng = SmallRng::from_seed(self.params.rng_seed);
+            self.simulation = LiveSimulation::new(&self.params, &mut self.rng);
         }
 
         if self.running {
             for _ in 0..self.steps_per_frame {
-                self.simulation.step(&self.params);
+                self.simulation.step(&self.params, &mut self.rng);
             }
             ui.ctx()
                 .request_repaint_after(Duration::from_secs_f32(1.0 / self.target_fps.max(1.0)));
