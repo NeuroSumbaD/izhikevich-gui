@@ -186,7 +186,12 @@ impl eframe::App for NeuronApp {
                     });
                 });
 
-                ui.label(format!("Live time: {:.2} ms", self.simulation.simulation_time));                
+                let live_time = if self.simulation.simulation_time < 1000.0 {
+                    format!("{:.2} ms", self.simulation.simulation_time)
+                } else {
+                    format!("{:.2} s", self.simulation.simulation_time / 1000.0)
+                };
+                ui.label(format!("Live time: {}", live_time));
             });
 
         if needs_reset {
