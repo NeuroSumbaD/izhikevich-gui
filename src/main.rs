@@ -51,8 +51,11 @@ impl NeuronApp {
             .and_then(|storage| eframe::get_value(storage, eframe::APP_KEY))
             .unwrap_or_default();
 
+        let simulation = LiveSimulation::new(&neuron_params);
+
         Self { 
             params: neuron_params,
+            simulation: simulation,
             ..Default::default()
          }
     }
@@ -146,8 +149,18 @@ impl eframe::App for NeuronApp {
 
                 ui.separator();
 
-                ui.heading("Input stimulus");
-                slider(ui, "Input current", &mut self.params.input_current, 0.0, 50.0);
+                ui.heading("Input Stimuli");
+
+                if self.params.input_currents.len() != self.params.num_neurons {
+                    self.params
+                        .input_currents
+                        .resize(self.params.num_neurons, 10.0);
+                }
+                
+                for (neuron, neuron_current) in self.params.input_currents.iter_mut().enumerate() {
+                    slider(ui, &format!("Neuron {} input current", neuron + 1),
+                        neuron_current, 0.0, 50.0);
+                }
 
                 ui.separator();
 
@@ -201,11 +214,13 @@ impl eframe::App for NeuronApp {
                 ui.heading("Membrane Potential");
             });
 
-            let voltage_trace = PlotPoints::from_iter(
+            let voltage_traces = Vec::from_iter(
                 self.simulation
-                    .history
+                    .histories
                     .iter()
-                    .map(|sample| [sample.t as f64, sample.v as f64]),
+                    .map(|history| PlotPoints::from_iter(
+                        history.iter().map(|sample| [sample.t as f64, sample.v as f64])
+                    ))
             );
 
             // 2. Resolve or fallback the dynamic plot height state
@@ -218,9 +233,13 @@ impl eframe::App for NeuronApp {
                 .y_axis_label("voltage (mV)")
                 .show(ui, |plot_ui| {
                     if self.show_points {
-                        plot_ui.points(Points::new("Neuron 1", voltage_trace).radius(2.0)); // Add points to the plot
+                        for (i, voltage_trace) in voltage_traces.into_iter().enumerate() {
+                            plot_ui.points(Points::new(format!("Neuron {}", i + 1), voltage_trace).radius(2.0));
+                        }; // Add points to the plot
                     } else {
-                        plot_ui.line(Line::new("Neuron 1", voltage_trace));
+                        for (i, voltage_trace) in voltage_traces.into_iter().enumerate() {
+                            plot_ui.line(Line::new(format!("Neuron {}", i + 1), voltage_trace));
+                        }; // Add lines to the plot
                     }
                 });
                     // });
@@ -260,11 +279,13 @@ impl eframe::App for NeuronApp {
                 ui.heading("Recovery variable");
             });
 
-            let recovery_points = PlotPoints::from_iter(
+            let recovery_traces = Vec::from_iter(
                 self.simulation
-                    .history
+                    .histories
                     .iter()
-                    .map(|sample| [sample.t as f64, sample.u as f64]),
+                    .map(|history| PlotPoints::from_iter(
+                        history.iter().map(|sample| [sample.t as f64, sample.u as f64])
+                    ))
             );
 
             Plot::new("recovery_plot")
@@ -274,9 +295,13 @@ impl eframe::App for NeuronApp {
                 .y_axis_label("u (a.u.)")
                 .show(ui, |plot_ui| {
                     if self.show_points {
-                        plot_ui.points(Points::new("Neuron 1", recovery_points).radius(2.0)); // Add points to the plot
+                        for (i, recovery_trace) in recovery_traces.into_iter().enumerate() {
+                            plot_ui.points(Points::new(format!("Neuron {}", i + 1), recovery_trace).radius(2.0));
+                        }; // Add points to the plot
                     } else {
-                        plot_ui.line(Line::new("Neuron 1", recovery_points));
+                        for (i, recovery_trace) in recovery_traces.into_iter().enumerate() {
+                            plot_ui.line(Line::new(format!("Neuron {}", i + 1), recovery_trace));
+                        }; // Add lines to the plot
                     }
                 });
         });

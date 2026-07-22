@@ -7,7 +7,7 @@
 
 use std::collections::VecDeque;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use crate::qmath::FixedPoint;
 
 #[derive(PartialEq, Serialize, Deserialize, Clone, Copy)]
@@ -16,7 +16,7 @@ pub enum NeuralModel {
     FixedPoint { bit_width: usize, q_width: usize },
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub struct NeuronParams {
     pub a: f32,
     pub b: f32,
@@ -25,12 +25,15 @@ pub struct NeuronParams {
     pub dt: f32,
     pub model: NeuralModel,
     pub num_neurons: usize,
-    pub input_current: f32,
+    pub input_currents: Vec<f32>,
     pub duration: f32,
 }
 
 impl Default for NeuronParams {
     fn default() -> Self {
+        let mut default_current: Vec<f32> = Vec::with_capacity(10);
+        default_current.push(10.0);
+
         Self {
             a: 0.02,
             b: 0.2,
@@ -39,7 +42,7 @@ impl Default for NeuronParams {
             dt: 0.25,
             model: NeuralModel::FloatingPoint,
             num_neurons: 1,
-            input_current: 10.0,
+            input_currents: default_current,
             duration: 250.0,
         }
     }
@@ -49,7 +52,6 @@ struct QParams {
     pub a: FixedPoint,
     pub b: FixedPoint,
     pub dt: FixedPoint,
-    pub input_current: FixedPoint,
 }
 
 impl QParams {
@@ -58,7 +60,6 @@ impl QParams {
             a: FixedPoint::new(bit_width, q_width, params.a as f64),
             b: FixedPoint::new(bit_width, q_width, params.b as f64),
             dt: FixedPoint::new(bit_width, q_width, params.dt as f64),
-            input_current: FixedPoint::new(bit_width, q_width, params.input_current as f64),
         }
     }
 }
@@ -113,16 +114,18 @@ impl LiveSimulation {
         let dt = params.dt.max(0.001);
         self.simulation_time += dt;
 
-        for neuron in 0..params.num_neurons {
+        for (neuron, history) in self.histories.iter_mut().enumerate() {
             // Step each neuron
-            let state = self.histories[neuron].back().unwrap().clone();
+            let mut state = history.back().unwrap().clone();
+            let current = params.input_currents.get(neuron).copied().unwrap_or(0.0);
+            let spike_times = &mut self.spike_times[neuron];
 
 
             let (next_v, next_u) = 
                 match params.model {
-                    NeuralModel::FloatingPoint => rk4_step(state.v, state.u, params, dt),
+                    NeuralModel::FloatingPoint => rk4_step(state.v, state.u, current, params, dt),
                     NeuralModel::FixedPoint { bit_width, q_width } => {
-                        q_step(state.v, state.u, params,  bit_width, q_width)
+                        q_step(state.v, state.u, current, params,  bit_width, q_width)
                     }
                 };
 
@@ -130,30 +133,30 @@ impl LiveSimulation {
             state.v = next_v;
             state.u = next_u;
 
-            if self.state.v >= 30.0 {
-                self.history.push_back(NeuralState {
-                    t: self.state.t,
+            if state.v >= 30.0 {
+                history.push_back(NeuralState {
+                    t: state.t,
                     v: 30.0,
-                    u: self.state.u,
+                    u: state.u,
                 });
-                self.spike_times.push_back(self.state.t);
-                self.state.v = params.c;
-                self.state.u += params.d;
+                spike_times.push_back(state.t);
+                state.v = params.c;
+                state.u += params.d;
             }
 
-            self.history.push_back(NeuralState {
-                t: self.state.t,
-                v: self.state.v,
-                u: self.state.u,
+            history.push_back(NeuralState {
+                t: state.t,
+                v: state.v,
+                u: state.u,
             });
 
-            while self.history.len() > self.window_samples {
-                self.history.pop_front();
+            while history.len() > self.window_samples {
+                history.pop_front();
             }
 
-            let window_start = self.history.front().map(|sample| sample.t).unwrap_or(self.state.t);
-            while self.spike_times.front().is_some_and(|spike_time| *spike_time < window_start) {
-                self.spike_times.pop_front();
+            let window_start = history.front().map(|sample| sample.t).unwrap_or(state.t);
+            while spike_times.front().is_some_and(|spike_time| *spike_time < window_start) {
+                spike_times.pop_front();
             }
 
         }
@@ -164,19 +167,21 @@ impl LiveSimulation {
 /// # Returns
 ///  - next_v: f32 -- next membrane potential
 ///  - next_u: f32 -- next recovery variable
-fn rk4_step(v: f32, u: f32, params: &NeuronParams, dt: f32) -> (f32, f32) {
-    let k1 = derivatives(v, u, params);
+fn rk4_step(v: f32, u: f32, current: f32, params: &NeuronParams, dt: f32) -> (f32, f32) {
+    let k1 = derivatives(v, u, current, params);
     let k2 = derivatives(
         v + 0.5 * dt * k1.0,
         u + 0.5 * dt * k1.1,
+        current,
         params,
     );
     let k3 = derivatives(
         v + 0.5 * dt * k2.0,
         u + 0.5 * dt * k2.1,
+        current,
         params,
     );
-    let k4 = derivatives(v + dt * k3.0, u + dt * k3.1, params);
+    let k4 = derivatives(v + dt * k3.0, u + dt * k3.1, current, params);
 
     let next_v = v + dt * (k1.0 + 2.0 * k2.0 + 2.0 * k3.0 + k4.0) / 6.0;
     let next_u = u + dt * (k1.1 + 2.0 * k2.1 + 2.0 * k3.1 + k4.1) / 6.0;
@@ -184,18 +189,29 @@ fn rk4_step(v: f32, u: f32, params: &NeuronParams, dt: f32) -> (f32, f32) {
     (next_v, next_u)
 }
 
-fn derivatives(v: f32, u: f32, params: &NeuronParams) -> (f32, f32) {
-    let dv = 0.04 * v * v + 5.0 * v + 140.0 - u + params.input_current;
+fn derivatives(v: f32, u: f32, current: f32, params: &NeuronParams) -> (f32, f32) {
+    let dv = 0.04 * v * v + 5.0 * v + 140.0 - u + current;
     let du = params.a * (params.b * v - u);
 
     (dv, du)
 }
 
-
-fn q_step(v: f32, u: f32, params: &NeuronParams, bit_width: usize, q_width: usize) -> (f32, f32) {
+/// Euler step method implemented with fixed-point arithmetic for the Izhikevich neuron model equations
+/// # Arguments
+/// * `v` - The current membrane potential
+/// * `u` - The current recovery variable
+/// * `current` - The current input
+/// * `params` - The neuron parameters
+/// * `bit_width` - The width of the fixed-point representation
+/// * `q_width` - The quantization width of the fixed-point representation
+/// # Returns
+///  - next_v: f32 -- next membrane potential
+///  - next_u: f32 -- next recovery variable
+fn q_step(v: f32, u: f32, current: f32, params: &NeuronParams, bit_width: usize, q_width: usize) -> (f32, f32) {
     // convert state variables and parameters to fixed-point representation
     let v_q = FixedPoint::new(bit_width, q_width, v);
     let u_q = FixedPoint::new(bit_width, q_width, u);
+    let current_q = FixedPoint::new(bit_width, q_width, current);
 
     let params_q = QParams::from_fp(params, bit_width, q_width);
 
@@ -206,7 +222,7 @@ fn q_step(v: f32, u: f32, params: &NeuronParams, bit_width: usize, q_width: usiz
     let v_s1 = (v_q * x_const).truncate(bit_width, q_width);
     let v_s2 = (v_s1 + y_const).truncate(bit_width, q_width);
     let v_s3 = (v_s2 * v_q).truncate(bit_width, q_width);
-    let v_s4 = (params_q.input_current + w_const + v_s3 - u_q).truncate(bit_width, q_width);
+    let v_s4 = (current_q + w_const + v_s3 - u_q).truncate(bit_width, q_width);
     let v_next = ((v_s4 * params_q.dt).truncate(bit_width, q_width) + v_q).truncate(bit_width, q_width);
 
     let u_s1 = (v_q * params_q.b).truncate(bit_width, q_width);
