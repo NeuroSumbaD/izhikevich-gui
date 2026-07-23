@@ -132,6 +132,15 @@ impl eframe::App for NeuronApp {
 
                 ui.heading("Neural Parameters");
 
+                ui.label("Input parameters:");
+                slider(ui, "excitatory reversal potential (mV)", &mut self.params.rev_e, -750.0, 100.0);
+                slider(ui, "maximum excitatory conductance", &mut self.params.ge_bar, 0.0, 4.0);
+                slider(ui, "leakage reversal potential (mV)", &mut self.params.rev_l, -100.0, -50.0);
+                slider(ui, "leakage conductance", &mut self.params.gl_bar, 0.0, 4.0);
+                slider(ui, "inhibitory reversal potential (mV)", &mut self.params.rev_i, -100.0, -50.0);
+                slider(ui, "maximum inhibitory conductance", &mut self.params.gi_bar, 0.0, 4.0);
+
+                ui.label("Izhikevich model:");
                 slider(ui, "a", &mut self.params.a, 0.001, 0.2);
                 slider(ui, "b", &mut self.params.b, 0.01, 0.5);
                 slider(ui, "c", &mut self.params.c, -80.0, -40.0);
@@ -154,20 +163,20 @@ impl eframe::App for NeuronApp {
 
                 ui.heading("Input Stimuli");
 
-                if self.params.input_currents.len() != self.params.num_neurons {
+                if self.params.exc_inputs.len() != self.params.num_neurons {
                     self.params
-                        .input_currents
-                        .resize(self.params.num_neurons, 10.0);
+                        .exc_inputs
+                        .resize(self.params.num_neurons, 0.1);
 
                     self.params
                         .noise_std_devs
-                        .resize(self.params.num_neurons, 0.0);
+                        .resize(self.params.num_neurons, 0.1);
                 }
                 
-                for (neuron, neuron_current) in self.params.input_currents.iter_mut().enumerate() {
+                for (neuron, neuron_current) in self.params.exc_inputs.iter_mut().enumerate() {
                     ui.label(format!("Neuron {}", neuron + 1));
-                    slider(ui, &"Input current (mA)", neuron_current, 0.0, 50.0);
-                    slider(ui, &"Noise std dev (mA)", &mut self.params.noise_std_devs[neuron], 0.0, 10.0);
+                    slider(ui, &"Normalized Excitatory input", neuron_current, 0.0, 1.0);
+                    slider(ui, &"Input Noise std dev", &mut self.params.noise_std_devs[neuron], 0.0, 0.2);
                 }
 
                 ui.separator();

@@ -26,9 +26,15 @@ pub struct NeuronParams {
     pub c: f32,
     pub d: f32,
     pub dt: f32,
+    pub rev_e: f32,
+    pub rev_l: f32,
+    pub rev_i: f32,
+    pub ge_bar: f32,
+    pub gi_bar: f32,
+    pub gl_bar: f32,
     pub model: NeuralModel,
     pub num_neurons: usize,
-    pub input_currents: Vec<f32>,
+    pub exc_inputs: Vec<f32>,
     pub duration: f32,
     pub noise_std_devs: Vec<f32>,
     pub rng_seed: [u8; 32],
@@ -36,13 +42,19 @@ pub struct NeuronParams {
 
 impl Default for NeuronParams {
     fn default() -> Self {
-        let mut default_current: Vec<f32> = Vec::with_capacity(10);
-        default_current.push(10.0);
+        let mut default_input: Vec<f32> = Vec::with_capacity(10);
+        default_input.push(0.1);
 
         let mut default_noise: Vec<f32> = Vec::with_capacity(10);
         default_noise.push(0.0);
 
         Self {
+            rev_e: 45.0,
+            rev_l: -75.0,
+            rev_i: -85.0,
+            ge_bar: 1.5,
+            gi_bar: 1.0,
+            gl_bar: 1.0,
             a: 0.02,
             b: 0.2,
             c: -65.0,
@@ -50,7 +62,7 @@ impl Default for NeuronParams {
             dt: 0.25,
             model: NeuralModel::FloatingPoint,
             num_neurons: 1,
-            input_currents: default_current,
+            exc_inputs: default_input,
             duration: 250.0,
             noise_std_devs: default_noise,
             rng_seed: [0; 32],
@@ -62,6 +74,12 @@ struct QParams {
     pub a: FixedPoint,
     pub b: FixedPoint,
     pub dt: FixedPoint,
+    pub rev_e: FixedPoint,
+    pub rev_l: FixedPoint,
+    pub rev_i: FixedPoint,
+    pub ge_bar: FixedPoint,
+    pub gi_bar: FixedPoint,
+    pub gl_bar: FixedPoint,
 }
 
 impl QParams {
@@ -70,6 +88,12 @@ impl QParams {
             a: FixedPoint::new(bit_width, q_width, params.a as f64),
             b: FixedPoint::new(bit_width, q_width, params.b as f64),
             dt: FixedPoint::new(bit_width, q_width, params.dt as f64),
+            rev_e: FixedPoint::new(bit_width, q_width, params.rev_e as f64),
+            rev_l: FixedPoint::new(bit_width, q_width, params.rev_l as f64),
+            rev_i: FixedPoint::new(bit_width, q_width, params.rev_i as f64),
+            ge_bar: FixedPoint::new(bit_width, q_width, params.ge_bar as f64),
+            gi_bar: FixedPoint::new(bit_width, q_width, params.gi_bar as f64),
+            gl_bar: FixedPoint::new(bit_width, q_width, params.gl_bar as f64),
         }
     }
 }
@@ -127,21 +151,21 @@ impl LiveSimulation {
         for (neuron, history) in self.histories.iter_mut().enumerate() {
             // Step each neuron
             let mut state = history.back().unwrap().clone();
-            let mut current = params.input_currents.get(neuron).copied().unwrap_or(0.0);
+            let mut exc_input = params.exc_inputs.get(neuron).copied().unwrap_or(0.0);
             let noise_std_dev = params.noise_std_devs.get(neuron).copied().unwrap_or(0.0);
             let spike_times = &mut self.spike_times[neuron];
 
             // Add input noise to the current input
             if noise_std_dev > 0.0 {
                 let noise: f32 = Normal::new(0.0, noise_std_dev).unwrap().sample(rng);
-                current += noise;
+                exc_input += noise;
             }
 
             let (next_v, next_u) = 
                 match params.model {
-                    NeuralModel::FloatingPoint => rk4_step(state.v, state.u, current, params, dt),
+                    NeuralModel::FloatingPoint => rk4_step(state.v, state.u, exc_input, params, dt),
                     NeuralModel::FixedPoint { bit_width, q_width } => {
-                        q_step(state.v, state.u, current, params,  bit_width, q_width)
+                        q_step(state.v, state.u, exc_input, params,  bit_width, q_width)
                     }
                 };
 
@@ -183,21 +207,21 @@ impl LiveSimulation {
 /// # Returns
 ///  - next_v: f32 -- next membrane potential
 ///  - next_u: f32 -- next recovery variable
-fn rk4_step(v: f32, u: f32, current: f32, params: &NeuronParams, dt: f32) -> (f32, f32) {
-    let k1 = derivatives(v, u, current, params);
+fn rk4_step(v: f32, u: f32, exc_input: f32, params: &NeuronParams, dt: f32) -> (f32, f32) {
+    let k1 = derivatives(v, u, exc_input, params);
     let k2 = derivatives(
         v + 0.5 * dt * k1.0,
         u + 0.5 * dt * k1.1,
-        current,
+        exc_input,
         params,
     );
     let k3 = derivatives(
         v + 0.5 * dt * k2.0,
         u + 0.5 * dt * k2.1,
-        current,
+        exc_input,
         params,
     );
-    let k4 = derivatives(v + dt * k3.0, u + dt * k3.1, current, params);
+    let k4 = derivatives(v + dt * k3.0, u + dt * k3.1, exc_input, params);
 
     let next_v = v + dt * (k1.0 + 2.0 * k2.0 + 2.0 * k3.0 + k4.0) / 6.0;
     let next_u = u + dt * (k1.1 + 2.0 * k2.1 + 2.0 * k3.1 + k4.1) / 6.0;
@@ -205,7 +229,13 @@ fn rk4_step(v: f32, u: f32, current: f32, params: &NeuronParams, dt: f32) -> (f3
     (next_v, next_u)
 }
 
-fn derivatives(v: f32, u: f32, current: f32, params: &NeuronParams) -> (f32, f32) {
+fn derivatives(v: f32, u: f32, exc_input: f32, params: &NeuronParams) -> (f32, f32) {
+    let i_exc = params.ge_bar * (params.rev_e - v) * exc_input;
+    let i_leak = params.gl_bar * (params.rev_l - v);
+    // TODO: implement FFFB lateral inhibition
+    // let i_inh = params.gi_bar * (params.rev_i - v) * exc_input;
+    let current = i_exc + i_leak;
+
     let dv = 0.04 * v * v + 5.0 * v + 140.0 - u + current;
     let du = params.a * (params.b * v - u);
 
@@ -223,13 +253,28 @@ fn derivatives(v: f32, u: f32, current: f32, params: &NeuronParams) -> (f32, f32
 /// # Returns
 ///  - next_v: f32 -- next membrane potential
 ///  - next_u: f32 -- next recovery variable
-fn q_step(v: f32, u: f32, current: f32, params: &NeuronParams, bit_width: usize, q_width: usize) -> (f32, f32) {
+fn q_step(v: f32, u: f32, exc_input: f32, params: &NeuronParams, bit_width: usize, q_width: usize) -> (f32, f32) {
     // convert state variables and parameters to fixed-point representation
     let v_q = FixedPoint::new(bit_width, q_width, v);
     let u_q = FixedPoint::new(bit_width, q_width, u);
-    let current_q = FixedPoint::new(bit_width, q_width, current);
-
+    let exc_input_q = FixedPoint::new(bit_width, q_width, exc_input);
     let params_q = QParams::from_fp(params, bit_width, q_width);
+
+    let i_exc_q = (
+        params_q.ge_bar * 
+        (params_q.rev_e - v_q).truncate(bit_width, q_width) *
+        exc_input_q
+        ).truncate(bit_width, q_width);
+    let i_leak_q = (
+        params_q.gl_bar *
+        (params_q.rev_l - v_q).truncate(bit_width, q_width)
+        ).truncate(bit_width, q_width);
+    // TODO: implement FFFB lateral inhibition
+    // let i_inh_q = FixedPoint::new(bit_width, q_width, params.gi_bar * (params.rev_i - v) * exc_input);
+
+    let current_q = (i_exc_q + i_leak_q).truncate(bit_width, q_width);
+    // let current_q = i_exc_q + i_leak_q + i_inh_q;
+
 
     let x_const = FixedPoint::new(bit_width, q_width, 0.04);
     let y_const = FixedPoint::new(bit_width, q_width, 5.0);

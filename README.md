@@ -1,5 +1,8 @@
 # Izhikevich Neuron Visualizer
 
+![Description for screen readers](/assets/Screenshot.png)
+*Figure 1: Sample screenshot.*
+
 This repository is a small interactive simulator for Izhikevich neuron models, with an emphasis on limited-precision arithmetic and fixed-point formats that resemble what you would implement in digital logic.
 
 It is built as a desktop GUI in Rust using `eframe` and `egui_plot`, so you can tune model parameters, compare floating-point and fixed-point behavior, and watch the voltage and recovery-variable traces update in real time.
@@ -65,6 +68,5 @@ This is not a general-purpose neural simulator or a large-scale network engine. 
 
 ## Upcoming features
  - Inhibitory competition between neurons
- - Conductance-based input rather than current-based, which gives dynamics more like the synapses in biological neurons
  - Separate window to plot the firing rate vs input
  - Saving simulations as PNG or CSV data
