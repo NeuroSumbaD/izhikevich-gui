@@ -6,7 +6,7 @@ use rand::{SeedableRng, rngs::SmallRng};
 
 mod qmath;
 mod izh;
-use izh::{NeuronParams, LiveSimulation};
+use izh::{NeuronParams, NeuralState, LiveSimulation};
 
 fn main() -> eframe::Result<()> {
 
@@ -42,6 +42,8 @@ struct NeuronApp {
     steps_per_frame: u32,
     show_points: bool,
     rng: SmallRng,
+    show_filtered: bool,
+    cutoff_hz: f32,
 }
 
 impl NeuronApp {
@@ -77,6 +79,8 @@ impl Default for NeuronApp {
             steps_per_frame: 4,
             show_points: false,
             rng: rng,
+            show_filtered: false,
+            cutoff_hz: 1000.0,
         }
     }
 }
@@ -191,6 +195,10 @@ impl eframe::App for NeuronApp {
 
                     if ui.button("Reset").clicked() {
                         needs_reset = true;
+                    }
+
+                    if ui.button("Filtered traces").clicked() {
+                        self.show_filtered = !self.show_filtered;
                     }
                 });
 
@@ -329,6 +337,51 @@ impl eframe::App for NeuronApp {
                     }
                 });
         });
+
+        if self.show_filtered {
+            // Calculated filtered membrane potentials
+            let filtered_voltages: Vec<Vec<[f64; 2]>> = self.simulation.histories
+                .iter()
+                .map(|history| history.iter().map(|sample| [
+                    sample.t, 
+                    if sample.v as f64 >= 30.0 { 30.0 } else { 0.0 }
+                    ]))
+                .map(|history| {
+                    let mut filtered_history = Vec::new();
+                    let mut prev_filtered_v = 0.0;
+                    for sample in history {
+                        prev_filtered_v = low_pass_step(prev_filtered_v, sample[1], self.cutoff_hz, self.params.dt/1000.0);
+                        filtered_history.push([sample[0] as f64, prev_filtered_v as f64]);
+                    }
+                    filtered_history
+                })
+                .collect();
+
+            let filtered_traces = Vec::from_iter(
+                filtered_voltages
+                    .iter()
+                    .map(|trace| {
+                        PlotPoints::from_iter(
+                            trace.iter().map(|sample| [sample[0] as f64, sample[1] as f64])
+                        )
+                    })
+            );
+
+            // Show filtered traces
+            egui::Window::new("Filtered traces")
+            .open(&mut self.show_filtered)
+            .show(ui.ctx(), |ui| {
+                ui.label("cutoff");
+                ui.add(egui::Slider::new(&mut self.cutoff_hz, 1.0..=100000.0));
+
+                Plot::new("filtered_plot").show(ui, |plot_ui| {
+                    // draw filtered traces here
+                    for (i, filtered_trace) in filtered_traces.into_iter().enumerate() {
+                            plot_ui.line(Line::new(format!("Neuron {}", i + 1), filtered_trace));
+                    }; // Add lines to the plot
+                });
+            });
+        }
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -341,4 +394,9 @@ where
     T: egui::emath::Numeric,
 {
     ui.add(egui::Slider::new(value, min..=max).text(label)).changed()
+}
+
+fn low_pass_step(prev: f32, x: f32, cutoff_hz: f32, dt_seconds: f32) -> f32 {
+    let alpha = 1.0 - (-2.0 * std::f32::consts::TAU * cutoff_hz * dt_seconds).exp();
+    prev + alpha * (x - prev)
 }
