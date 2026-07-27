@@ -14,14 +14,15 @@ fn main() -> eframe::Result<()> {
     let icon_image = load_from_memory(icon_bytes).expect("Failed to load icon image").to_rgba8();
 
     let options = eframe::NativeOptions{
-
-        viewport: egui::ViewportBuilder::default().with_icon(
-            egui::IconData{
-                rgba: icon_image.into_raw(),
-                width: 512,
-                height: 512,
-            },
-        ),
+        viewport: egui::ViewportBuilder::default()
+            .with_icon(
+                egui::IconData{
+                    rgba: icon_image.into_raw(),
+                    width: 512,
+                    height: 512,
+                },
+            )
+            .with_min_inner_size([600.0, 400.0]),
         ..Default::default()
     };
     eframe::run_native(
@@ -44,6 +45,7 @@ struct NeuronApp {
     rng: SmallRng,
     show_filtered: bool,
     cutoff_hz: f32,
+    show_stimuli: bool,
 }
 
 impl NeuronApp {
@@ -75,12 +77,13 @@ impl Default for NeuronApp {
             simulation,
             running: true,
             plot_height: Some(500.0),
-            target_fps: 30.0,
+            target_fps: 60.0,
             steps_per_frame: 4,
             show_points: false,
             rng: rng,
             show_filtered: false,
-            cutoff_hz: 1000.0,
+            cutoff_hz: 10.0,
+            show_stimuli: false,
         }
     }
 }
@@ -90,7 +93,7 @@ impl eframe::App for NeuronApp {
         let mut needs_reset = false;
 
         egui::Panel::left("controls")
-            .resizable(false)
+            // .resizable(false)
             .default_size(280.0)
             .show_inside(ui, |ui| {
                 ui.heading("Izhikevich Controls");
@@ -98,90 +101,87 @@ impl eframe::App for NeuronApp {
 
                 ui.separator();
 
-                ui.heading("Neural representation");
-
-                egui::ComboBox::from_label("Model Type")
-                    .selected_text(if let izh::NeuralModel::FixedPoint { bit_width, q_width } = self.params.model {
-                        format!("Fixed Point Q{}.{}", bit_width, q_width).to_string()
-                    } else {
-                        "Floating Point".to_string()
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut self.params.model,
-                            izh::NeuralModel::FloatingPoint,
-                            "Floating Point",
-                        );
-                        ui.selectable_value(
-                            &mut self.params.model,
-                            izh::NeuralModel::FixedPoint { bit_width: 32, q_width: 16 },
-                            "Fixed Point (32-bit, Q16)",
-                        );
+                egui::CollapsingHeader::new(egui::RichText::new("Neural representation").heading())
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        // Content for the collapsing header
+                        egui::ComboBox::from_label("Model Type")
+                            .selected_text(if let izh::NeuralModel::FixedPoint { bit_width, q_width } = self.params.model {
+                                format!("Fixed Point Q{}.{}", bit_width, q_width).to_string()
+                            } else {
+                                "Floating Point".to_string()
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut self.params.model,
+                                    izh::NeuralModel::FloatingPoint,
+                                    "Floating Point",
+                                );
+                                ui.selectable_value(
+                                    &mut self.params.model,
+                                    izh::NeuralModel::FixedPoint { bit_width: 32, q_width: 16 },
+                                    "Fixed Point (32-bit, Q16)",
+                                );
+                            });
+        
+                        match &mut self.params.model {
+                            izh::NeuralModel::FloatingPoint => {
+                                ui.label("Using 32-bit floating-point arithmetic for simulation.");
+                            }
+                            &mut izh::NeuralModel::FixedPoint { ref mut bit_width, ref mut q_width } => {
+                                slider(ui, "Bit Width", bit_width, 8_usize, 32_usize);
+                                slider(ui, "Q Width", q_width, 1_usize, *bit_width - 4);
+                                ui.label(format!("Using fixed-point arithmetic with bit width {} and Q width {}.", bit_width, q_width));
+                                ui.label(format!("Largest integer representable: {}", (1 << (*bit_width - *q_width - 1)) - 1));
+                                ui.label(format!("Least significant bit value: {}", 1.0 / (1 << *q_width) as f64));
+                            }
+                        }
                     });
 
-                match &mut self.params.model {
-                    izh::NeuralModel::FloatingPoint => {
-                        ui.label("Using 32-bit floating-point arithmetic for simulation.");
-                    }
-                    &mut izh::NeuralModel::FixedPoint { ref mut bit_width, ref mut q_width } => {
-                        slider(ui, "Bit Width", bit_width, 8_usize, 32_usize);
-                        slider(ui, "Q Width", q_width, 1_usize, *bit_width - 4);
-                        ui.label(format!("Using fixed-point arithmetic with bit width {} and Q width {}.", bit_width, q_width));
-                        ui.label(format!("Largest integer representable: {}", (1 << (*bit_width - *q_width - 1)) - 1));
-                        ui.label(format!("Least significant bit value: {}", 1.0 / (1 << *q_width) as f64));
-                    }
-                }
 
                 ui.separator();
 
-                ui.heading("Neural Parameters");
+                egui::CollapsingHeader::new(egui::RichText::new("Neural Parameters").heading())
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        egui::CollapsingHeader::new("Conductances:")
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                // Add your content here
+                                slider(ui, "excitatory reversal potential (mV)", &mut self.params.rev_e, -45.0, 100.0);
+                                slider(ui, "maximum excitatory conductance", &mut self.params.ge_bar, 0.0, 4.0);
+                                slider(ui, "leakage reversal potential (mV)", &mut self.params.rev_l, -100.0, -45.0);
+                                slider(ui, "leakage conductance", &mut self.params.gl_bar, 0.0, 4.0);
+                                slider(ui, "inhibitory reversal potential (mV)", &mut self.params.rev_i, -100.0, -45.0);
+                                slider(ui, "maximum inhibitory conductance", &mut self.params.gi_bar, 0.0, 4.0);
+                            });
+        
+                        egui::CollapsingHeader::new("Izhikevich parameters:")
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                slider(ui, "a", &mut self.params.a, 0.001, 0.2);
+                                slider(ui, "b", &mut self.params.b, 0.01, 0.5);
+                                slider(ui, "c", &mut self.params.c, -80.0, -40.0);
+                                slider(ui, "d", &mut self.params.d, 0.0, 20.0);
+                                slider(ui, "dt (ms)", &mut self.params.dt, 0.01, 2.0);
+                            });
+                        if slider(ui, "Number of neurons:", &mut self.params.num_neurons, 1, 10) {
+                            needs_reset = true;
+                        }
+                    });
 
-                ui.label("Input parameters:");
-                slider(ui, "excitatory reversal potential (mV)", &mut self.params.rev_e, -750.0, 100.0);
-                slider(ui, "maximum excitatory conductance", &mut self.params.ge_bar, 0.0, 4.0);
-                slider(ui, "leakage reversal potential (mV)", &mut self.params.rev_l, -100.0, -50.0);
-                slider(ui, "leakage conductance", &mut self.params.gl_bar, 0.0, 4.0);
-                slider(ui, "inhibitory reversal potential (mV)", &mut self.params.rev_i, -100.0, -50.0);
-                slider(ui, "maximum inhibitory conductance", &mut self.params.gi_bar, 0.0, 4.0);
+                egui::CollapsingHeader::new("View controls")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        if slider(ui, "Window (ms)", &mut self.params.duration, 20.0, 1000.0) {
+                            self.simulation.window_samples = ((self.params.duration / self.params.dt.max(0.001)).ceil() as usize).max(2) + 1;
+                        }
+                        slider(ui, "Update FPS", &mut self.target_fps, 1.0, 120.0);
+                        slider(ui, "Steps / frame", &mut self.steps_per_frame, 1, 25);
+        
+                        ui.checkbox(&mut self.show_points, "Show points");
+                    });
 
-                ui.label("Izhikevich model:");
-                slider(ui, "a", &mut self.params.a, 0.001, 0.2);
-                slider(ui, "b", &mut self.params.b, 0.01, 0.5);
-                slider(ui, "c", &mut self.params.c, -80.0, -40.0);
-                slider(ui, "d", &mut self.params.d, 0.0, 20.0);
-                slider(ui, "dt (ms)", &mut self.params.dt, 0.01, 2.0);
-                if slider(ui, "Number of neurons:", &mut self.params.num_neurons, 1, 10) {
-                    needs_reset = true;
-                }
-
-                ui.label("View controls:");
-                if slider(ui, "Window (ms)", &mut self.params.duration, 20.0, 1000.0) {
-                    self.simulation.window_samples = ((self.params.duration / self.params.dt.max(0.001)).ceil() as usize).max(2) + 1;
-                }
-                slider(ui, "Update FPS", &mut self.target_fps, 1.0, 120.0);
-                slider(ui, "Steps / frame", &mut self.steps_per_frame, 1, 25);
-
-                ui.checkbox(&mut self.show_points, "Show points");
-
-                ui.separator();
-
-                ui.heading("Input Stimuli");
-
-                if self.params.exc_inputs.len() != self.params.num_neurons {
-                    self.params
-                        .exc_inputs
-                        .resize(self.params.num_neurons, 0.1);
-
-                    self.params
-                        .noise_std_devs
-                        .resize(self.params.num_neurons, 0.1);
-                }
-                
-                for (neuron, neuron_current) in self.params.exc_inputs.iter_mut().enumerate() {
-                    ui.label(format!("Neuron {}", neuron + 1));
-                    slider(ui, &"Normalized Excitatory input", neuron_current, 0.0, 1.0);
-                    slider(ui, &"Input Noise std dev", &mut self.params.noise_std_devs[neuron], 0.0, 0.2);
-                }
 
                 ui.separator();
 
@@ -197,7 +197,11 @@ impl eframe::App for NeuronApp {
                         needs_reset = true;
                     }
 
-                    if ui.button("Filtered traces").clicked() {
+                    if ui.button("Stimuli Editor").clicked() {
+                        self.show_stimuli = !self.show_stimuli;
+                    }
+
+                    if ui.button("show filtered traces").clicked() {
                         self.show_filtered = !self.show_filtered;
                     }
                 });
@@ -338,6 +342,38 @@ impl eframe::App for NeuronApp {
                 });
         });
 
+        if self.show_stimuli {
+            // Show stimuli editor
+            egui::Window::new("Stimuli Editor")
+                .open(&mut self.show_stimuli)
+                .min_height(300.0)
+                .show(ui.ctx(), |ui| {
+                    ui.heading("Input Stimuli");
+
+                    if self.params.exc_inputs.len() != self.params.num_neurons {
+                        self.params
+                            .exc_inputs
+                            .resize(self.params.num_neurons, 0.1);
+
+                        self.params
+                            .noise_std_devs
+                            .resize(self.params.num_neurons, 0.001);
+                    }
+                    
+                    egui::ScrollArea::vertical()
+                        // 2. Instruct the scroll area to fill the remaining panel height
+                        .auto_shrink([false; 2]) 
+                        .show(ui, |ui| {
+                            for (neuron, neuron_current) in self.params.exc_inputs.iter_mut().enumerate() {
+                                ui.label(format!("Neuron {}", neuron + 1));
+                                slider(ui, &"Normalized Excitatory input", neuron_current, 0.0, 1.0);
+                                slider(ui, &"Input Noise std dev", &mut self.params.noise_std_devs[neuron], 0.0, 0.2);
+                            }
+                            ui.add(egui::Separator::default().spacing(5.0));
+                    });
+                });
+        }
+
         if self.show_filtered {
             // Calculated filtered membrane potentials
             let filtered_voltages: Vec<Vec<[f64; 2]>> = self.simulation.histories
@@ -372,7 +408,7 @@ impl eframe::App for NeuronApp {
             .open(&mut self.show_filtered)
             .show(ui.ctx(), |ui| {
                 ui.label("cutoff");
-                ui.add(egui::Slider::new(&mut self.cutoff_hz, 1.0..=100000.0));
+                ui.add(egui::Slider::new(&mut self.cutoff_hz, 1.0..=100000.0).logarithmic(true));
 
                 Plot::new("filtered_plot").show(ui, |plot_ui| {
                     // draw filtered traces here

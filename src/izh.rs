@@ -59,11 +59,11 @@ impl Default for NeuronParams {
             b: 0.2,
             c: -65.0,
             d: 8.0,
-            dt: 0.25,
+            dt: 0.125,
             model: NeuralModel::FloatingPoint,
             num_neurons: 1,
             exc_inputs: default_input,
-            duration: 250.0,
+            duration: 500.0,
             noise_std_devs: default_noise,
             rng_seed: [0; 32],
         }
