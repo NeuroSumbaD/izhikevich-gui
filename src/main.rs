@@ -6,7 +6,7 @@ use rand::{SeedableRng, rngs::SmallRng};
 
 mod qmath;
 mod izh;
-use izh::{NeuronParams, NeuralState, LiveSimulation};
+use izh::{NeuronParams, LiveSimulation, RateEstimateMethod};
 
 fn main() -> eframe::Result<()> {
 
@@ -44,8 +44,8 @@ struct NeuronApp {
     show_points: bool,
     rng: SmallRng,
     show_filtered: bool,
-    cutoff_hz: f32,
     show_stimuli: bool,
+    max_expected_rate: f64,
 }
 
 impl NeuronApp {
@@ -82,8 +82,8 @@ impl Default for NeuronApp {
             show_points: false,
             rng: rng,
             show_filtered: false,
-            cutoff_hz: 10.0,
             show_stimuli: false,
+            max_expected_rate: 100.0,
         }
     }
 }
@@ -91,6 +91,9 @@ impl Default for NeuronApp {
 impl eframe::App for NeuronApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let mut needs_reset = false;
+
+        let shared_x_axes = egui::Vec2b::new(true, false);
+        let shared_axis_group = "neuron_time_axis";
 
         egui::Panel::left("controls")
             // .resizable(false)
@@ -144,6 +147,17 @@ impl eframe::App for NeuronApp {
                 egui::CollapsingHeader::new(egui::RichText::new("Neural Parameters").heading())
                     .default_open(true)
                     .show(ui, |ui| {
+                        
+                        egui::CollapsingHeader::new("Izhikevich parameters:")
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                slider(ui, "a", &mut self.params.a, 0.001, 0.2);
+                                slider(ui, "b", &mut self.params.b, 0.01, 0.5);
+                                slider(ui, "c", &mut self.params.c, -80.0, -40.0);
+                                slider(ui, "d", &mut self.params.d, 0.0, 20.0);
+                                slider(ui, "dt (ms)", &mut self.params.dt, 0.01, 2.0);
+                            });
+
                         egui::CollapsingHeader::new("Conductances:")
                             .default_open(true)
                             .show(ui, |ui| {
@@ -155,16 +169,32 @@ impl eframe::App for NeuronApp {
                                 slider(ui, "inhibitory reversal potential (mV)", &mut self.params.rev_i, -100.0, -45.0);
                                 slider(ui, "maximum inhibitory conductance", &mut self.params.gi_bar, 0.0, 4.0);
                             });
-        
-                        egui::CollapsingHeader::new("Izhikevich parameters:")
+                            
+                        egui::CollapsingHeader::new("Rate-code parameters:")
                             .default_open(true)
                             .show(ui, |ui| {
-                                slider(ui, "a", &mut self.params.a, 0.001, 0.2);
-                                slider(ui, "b", &mut self.params.b, 0.01, 0.5);
-                                slider(ui, "c", &mut self.params.c, -80.0, -40.0);
-                                slider(ui, "d", &mut self.params.d, 0.0, 20.0);
-                                slider(ui, "dt (ms)", &mut self.params.dt, 0.01, 2.0);
+                                egui::ComboBox::from_label("Rate Estimation Method")
+                                    .selected_text(format!("{:?}", self.params.rate_estimate_method))
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(&mut self.params.rate_estimate_method, RateEstimateMethod::SpikeFilter, "Spike Filter");
+                                        ui.selectable_value(&mut self.params.rate_estimate_method, RateEstimateMethod::Isi, "ISI");
+                                    });
+
+                                slider(ui, "Leaky rate time constant (ms)", &mut self.params.leaky_rate_tau, 1.0, 1000.0);
                             });
+
+                        egui::CollapsingHeader::new("FFFB inhibition parameters:")
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                ui.checkbox(&mut self.params.use_fffb, "Use FFFB inhibition");
+                                slider(ui, "max vs avg:", &mut self.params.fffb_params.max_vs_avg, 0.0, 1.0);
+                                slider(ui, "feedforward component:", &mut self.params.fffb_params.ff, 0.0, 1.0);
+                                slider(ui, "initial feedforward activity:", &mut self.params.fffb_params.ff0, 0.0, 1.0);
+                                slider(ui, "feedback delay (ms):", &mut self.params.fffb_params.fb_dt, 0.0, 10.0);
+                                slider(ui, "feedback component:", &mut self.params.fffb_params.fb, 0.0, 1.0);
+                                slider(ui, "inhibitory conductance:", &mut self.params.fffb_params.gi, 0.0, 10.0); 
+                            });
+
                         if slider(ui, "Number of neurons:", &mut self.params.num_neurons, 1, 10) {
                             needs_reset = true;
                         }
@@ -241,9 +271,6 @@ impl eframe::App for NeuronApp {
             ui.heading("Neuron Response");
             ui.add_space(8.0);
 
-            let shared_x_axes = egui::Vec2b::new(true, false);
-            let shared_axis_group = "neuron_time_axis";
-
             ui.set_width(ui.available_width());
 
             ui.vertical_centered(|ui| {
@@ -264,6 +291,13 @@ impl eframe::App for NeuronApp {
 
             Plot::new("voltage_plot")
                 .height(current_height)
+                .label_formatter(|name, value| {
+                    if !name.is_empty() {
+                        format!("{}: {:.3}, {:.3}", name, value.x, value.y)
+                    } else {
+                        "".to_owned()
+                    }
+                })
                 .legend(Legend::default())
                 .link_axis(shared_axis_group, shared_x_axes)
                 .y_axis_label("voltage (mV)")
@@ -326,6 +360,13 @@ impl eframe::App for NeuronApp {
 
             Plot::new("recovery_plot")
                 .legend(Legend::default())
+                .label_formatter(|name, value| {
+                    if !name.is_empty() {
+                        format!("{}: {:.3}, {:.3}", name, value.x, value.y)
+                    } else {
+                        "".to_owned()
+                    }
+                })
                 .link_axis(shared_axis_group, shared_x_axes)
                 .x_axis_label("time (ms)")
                 .y_axis_label("u (a.u.)")
@@ -375,46 +416,46 @@ impl eframe::App for NeuronApp {
         }
 
         if self.show_filtered {
-            // Calculated filtered membrane potentials
-            let filtered_voltages: Vec<Vec<[f64; 2]>> = self.simulation.histories
-                .iter()
-                .map(|history| history.iter().map(|sample| [
-                    sample.t, 
-                    if sample.v as f64 >= 30.0 { 30.0 } else { 0.0 }
-                    ]))
-                .map(|history| {
-                    let mut filtered_history = Vec::new();
-                    let mut prev_filtered_v = 0.0;
-                    for sample in history {
-                        prev_filtered_v = low_pass_step(prev_filtered_v, sample[1], self.cutoff_hz, self.params.dt/1000.0);
-                        filtered_history.push([sample[0] as f64, prev_filtered_v as f64]);
-                    }
-                    filtered_history
-                })
-                .collect();
-
+            // Retrieve rate-code traces from the simulation
             let filtered_traces = Vec::from_iter(
-                filtered_voltages
+                self.simulation
+                    .rate_histories
                     .iter()
-                    .map(|trace| {
-                        PlotPoints::from_iter(
-                            trace.iter().map(|sample| [sample[0] as f64, sample[1] as f64])
-                        )
-                    })
+                    .zip(self.simulation.histories.iter())
+                    .map(|history| PlotPoints::from_iter(
+                        history.0.iter().zip(history.1.iter()).map(|samples| [samples.1.t as f64, *samples.0 as f64])
+                    ))
             );
 
             // Show filtered traces
             egui::Window::new("Filtered traces")
             .open(&mut self.show_filtered)
             .show(ui.ctx(), |ui| {
-                ui.label("cutoff");
-                ui.add(egui::Slider::new(&mut self.cutoff_hz, 1.0..=100000.0).logarithmic(true));
+                ui.vertical_centered(|ui| {
+                    ui.heading("Rate-coded traces");
+                });
 
-                Plot::new("filtered_plot").show(ui, |plot_ui| {
-                    // draw filtered traces here
-                    for (i, filtered_trace) in filtered_traces.into_iter().enumerate() {
+                slider(ui, "Max expected rate (Hz)", &mut self.max_expected_rate, 1.0, 1000.0);
+
+                Plot::new("Filtered_plot")
+                    .legend(Legend::default())
+                    .label_formatter(|name, value| {
+                        if !name.is_empty() {
+                            format!("{}: {:.3}, {:.3}", name, value.x, value.y)
+                        } else {
+                            "".to_owned()
+                        }
+                    })
+                    .link_axis(shared_axis_group, shared_x_axes)
+                    .x_axis_label("time (ms)")
+                    .y_axis_label("rate (Hz)")
+                    .auto_bounds([true, false])
+                    .show(ui, |plot_ui| {
+                        plot_ui.set_plot_bounds_y(0.0_f64..=(self.max_expected_rate));
+                        // draw filtered traces here
+                        for (i, filtered_trace) in filtered_traces.into_iter().enumerate() {
                             plot_ui.line(Line::new(format!("Neuron {}", i + 1), filtered_trace));
-                    }; // Add lines to the plot
+                        }; // Add lines to the plot
                 });
             });
         }
@@ -430,9 +471,4 @@ where
     T: egui::emath::Numeric,
 {
     ui.add(egui::Slider::new(value, min..=max).text(label)).changed()
-}
-
-fn low_pass_step(prev: f32, x: f32, cutoff_hz: f32, dt_seconds: f32) -> f32 {
-    let alpha = 1.0 - (-2.0 * std::f32::consts::TAU * cutoff_hz * dt_seconds).exp();
-    prev + alpha * (x - prev)
 }
