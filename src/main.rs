@@ -421,9 +421,8 @@ impl eframe::App for NeuronApp {
                 self.simulation
                     .rate_histories
                     .iter()
-                    .zip(self.simulation.histories.iter())
                     .map(|history| PlotPoints::from_iter(
-                        history.0.iter().zip(history.1.iter()).map(|samples| [samples.1.t as f64, *samples.0 as f64])
+                        history.iter().map(|sample| [sample[0] as f64, sample[1] as f64])
                     ))
             );
 

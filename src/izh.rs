@@ -207,7 +207,7 @@ pub struct LiveSimulation {
     pub histories: Vec<VecDeque<NeuralState>>,
     pub spike_times: Vec<VecDeque<f32>>,
     pub rate_codes: Vec<RateCode>,
-    pub rate_histories: Vec<VecDeque<f32>>,
+    pub rate_histories: Vec<VecDeque<[f32; 2]>>, // [time stamp, average rate]
     fbi: f32,
 }
 
@@ -300,13 +300,13 @@ impl LiveSimulation {
                     RateEstimateMethod::Isi => rate_code.step_isi(true, params.leaky_rate_tau, state.t, dt),
                     RateEstimateMethod::SpikeFilter => rate_code.step_spike_filter(true, params.leaky_rate_tau, state.t, dt),
                 };
-                rate_history.push_back(rate_code.avg_rate);
+                rate_history.push_back([state.t, rate_code.avg_rate]);
             } else {
                 match params.rate_estimate_method {
                     RateEstimateMethod::Isi => rate_code.step_isi(false, params.leaky_rate_tau, state.t, dt),
                     RateEstimateMethod::SpikeFilter => rate_code.step_spike_filter(false, params.leaky_rate_tau, state.t, dt),
                 };
-                rate_history.push_back(rate_code.avg_rate);
+                rate_history.push_back([state.t, rate_code.avg_rate]);
             }
 
             history.push_back(NeuralState {
@@ -315,13 +315,16 @@ impl LiveSimulation {
                 u: state.u,
             });
 
-            while history.len() > self.window_samples {
+            let window_start_time = self.simulation_time - params.duration;
+            while history.front().is_some_and(|sample| sample.t < window_start_time) {
                 history.pop_front();
-                rate_history.pop_front(); // NOTE: they should be the same length, but if that ever changes, this will become unsafe
             }
 
-            let window_start = history.front().map(|sample| sample.t).unwrap_or(state.t);
-            while spike_times.front().is_some_and(|spike_time| *spike_time < window_start) {
+            while rate_history.front().is_some_and(|sample| sample[0] < window_start_time) {
+                rate_history.pop_front();
+            }
+            
+            while spike_times.front().is_some_and(|spike_time| *spike_time < window_start_time) {
                 spike_times.pop_front();
             }
 
