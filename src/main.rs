@@ -45,7 +45,25 @@ struct NeuronApp {
     rng: SmallRng,
     show_filtered: bool,
     show_stimuli: bool,
+    show_rate_curve: bool,
     max_expected_rate: f64,
+    rate_curve: RateCurveWindow,
+}
+
+struct RateCurveWindow {
+    simulation_duration_secs: f32,
+    point_count: usize,
+    curve: Vec<[f64; 2]>,
+}
+
+impl Default for RateCurveWindow {
+    fn default() -> Self {
+        Self {
+            simulation_duration_secs: 5.0,
+            point_count: 25,
+            curve: Vec::new(),
+        }
+    }
 }
 
 impl NeuronApp {
@@ -61,6 +79,7 @@ impl NeuronApp {
             params: neuron_params,
             simulation: simulation,
             rng: rng,
+            rate_curve: RateCurveWindow::default(),
             ..Default::default()
          }
     }
@@ -83,7 +102,9 @@ impl Default for NeuronApp {
             rng: rng,
             show_filtered: false,
             show_stimuli: false,
+            show_rate_curve: false,
             max_expected_rate: 100.0,
+            rate_curve: RateCurveWindow::default(),
         }
     }
 }
@@ -225,16 +246,19 @@ impl eframe::App for NeuronApp {
 
                     if ui.button("Reset").clicked() {
                         needs_reset = true;
-                    }
-
-                    if ui.button("Stimuli Editor").clicked() {
-                        self.show_stimuli = !self.show_stimuli;
-                    }
-
-                    if ui.button("show filtered traces").clicked() {
-                        self.show_filtered = !self.show_filtered;
-                    }
+                    }                 
                 });
+
+                if ui.button("Stimuli Editor").clicked() {
+                    self.show_stimuli = !self.show_stimuli;
+                }
+
+                if ui.button("show filtered traces").clicked() {
+                    self.show_filtered = !self.show_filtered;
+                }
+                if ui.button("Rate curve").clicked() {
+                    self.show_rate_curve = true;
+                }
 
                 ui.horizontal(|ui| {
                     ui.label("Status:");
@@ -458,10 +482,108 @@ impl eframe::App for NeuronApp {
                 });
             });
         }
+
+        if self.show_rate_curve {
+            let mut run_requested = false;
+
+            egui::Window::new("Rate curve")
+                .open(&mut self.show_rate_curve)
+                .min_width(520.0)
+                .show(ui.ctx(), |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading("Firing Rate vs Input");
+                    });
+
+                    ui.label("This sweep clones the current neuron parameters, then runs a single-neuron simulation for each normalized input value.");
+
+                    slider(
+                        ui,
+                        "Simulation duration (s)",
+                        &mut self.rate_curve.simulation_duration_secs,
+                        0.25,
+                        30.0,
+                    );
+                    slider(ui, "Input points", &mut self.rate_curve.point_count, 2, 200);
+
+                    if ui.button("Run sweep").clicked() {
+                        run_requested = true;
+                    }
+
+                    if self.rate_curve.curve.is_empty() {
+                        ui.label("Run the sweep to generate the curve.");
+                    } else {
+                        let curve_points = PlotPoints::from_iter(self.rate_curve.curve.iter().copied());
+
+                        Plot::new("rate_curve_plot")
+                            .legend(Legend::default())
+                            .x_axis_label("normalized input")
+                            .y_axis_label("firing rate (Hz)")
+                            .show(ui, |plot_ui| {
+                                plot_ui.line(Line::new("Rate curve", curve_points));
+                            });
+                    }
+                });
+
+            if run_requested {
+                self.compute_rate_curve();
+            }
+        }
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, &self.params);
+    }
+}
+
+impl NeuronApp {
+    fn compute_rate_curve(&mut self) {
+        let point_count = self.rate_curve.point_count.max(2);
+        let duration_ms = (self.rate_curve.simulation_duration_secs.max(0.001) * 1000.0)
+            .max(self.params.dt.max(0.001));
+        let mut curve = Vec::with_capacity(point_count);
+
+        for index in 0..point_count {
+            let input = if point_count == 1 {
+                0.0
+            } else {
+                index as f32 / (point_count - 1) as f32
+            };
+
+            let mut sweep_params = self.params.clone();
+            sweep_params.num_neurons = 1;
+            sweep_params.duration = duration_ms;
+            sweep_params.exc_inputs = vec![input];
+
+            if let Some(noise_std_dev) = sweep_params.noise_std_devs.first().copied() {
+                sweep_params.noise_std_devs = vec![noise_std_dev];
+            } else {
+                sweep_params.noise_std_devs = vec![0.0];
+            }
+
+            let mut rng = SmallRng::from_seed(sweep_params.rng_seed);
+            let simulation = LiveSimulation::new(&sweep_params, &mut rng);
+            let spike_times = &simulation.spike_times[0];
+
+            let rate_hz = if spike_times.len() < 2 {
+                0.0
+            } else {
+                let isi_sum: f32 = spike_times
+                    .iter()
+                    .zip(spike_times.iter().skip(1))
+                    .map(|(previous, next)| next - previous)
+                    .sum();
+                let mean_isi = isi_sum / (spike_times.len() - 1) as f32;
+                if mean_isi > 0.0 {
+                    1000.0 / mean_isi
+                } else {
+                    0.0
+                }
+            };
+
+            curve.push([input as f64, rate_hz as f64]);
+        }
+
+        self.rate_curve.curve = curve;
     }
 }
 
