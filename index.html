@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Fullscreen egui App</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #1a1a1a;
+        }
+        canvas {
+            width: 100% !important;
+            height: 100% !important;
+            display: block;
+        }
+    </style>
+    <!-- Trunk will compile your Rust code to WASM and inject the loader here -->
+    <link rel="rust" data-bin="neuron_visualization" data-wasm-output-name="neuron_visualization" />
+</head>
+<body>
+    <canvas id="the_canvas_id"></canvas>
+</body>
+</html>

@@ -1,0 +1,18 @@
+[build]
+# The index.html entry point
+target = "index.html"
+# The folder where the compiled web assets will be generated
+dist = "dist"
+
+[watch]
+# Folders Trunk should monitor for auto-reloading during development
+watch = ["src", "index.html"]
+
+[serve]
+# Local dev server address (accessible at http://127.0.0.1:8089)
+address = "127.0.0.1"
+port = 8089
+
+[clean]
+# Clean the distribution directory before building
+dist = true

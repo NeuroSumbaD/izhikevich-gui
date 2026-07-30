@@ -593,3 +593,19 @@ where
 {
     ui.add(egui::Slider::new(value, min..=max).text(label)).changed()
 }
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub async fn start(canvas_id: &str) -> Result<(), wasm_bindgen::JsValue> {
+    let web_options = eframe::WebOptions::default();
+    
+    eframe::WebRunner::new()
+        .start(
+            canvas_id, // Links directly to "the_canvas_id" in your HTML
+            web_options,
+            Box::new(|cc| Ok(Box::new(MyEguiApp::new(cc)))),
+        )
+        .await?;
+        
+    Ok(())
+}

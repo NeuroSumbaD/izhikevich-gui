@@ -1,0 +1,48 @@
+name: Deploy egui App to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main # Triggers compilation whenever you push to main
+
+permissions:
+  contents: write # Required to allow the runner to push to the gh-pages branch
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Download and Install Trunk
+        run: |
+          # Downloads a pre-compiled Trunk binary instead of building from scratch to save time
+          wget -qO- https://github.com | tar -xzf-
+          mv trunk ~/.cargo/bin/
+
+      - name: Build Web Application
+        # GitHub Pages serves your site at NeuroSumbaD.github.io/izhikevich-gui/
+        run: trunk build --release --public-url "/izhikevich-gui/"
+
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: dist # This tells the runner to deploy the compiled outputs from Trunk
+          branch: gh-pages # Target branch for hosting
