@@ -31,11 +31,11 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Download and Install Trunk
-        run: |
-          # Downloads a pre-compiled Trunk binary instead of building from scratch to save time
-          wget -qO- https://github.com | tar -xzf-
-          mv trunk ~/.cargo/bin/
+      - name: Install Trunk
+        uses: jetli/trunk-action@v0.5.0
+        with:
+          # Optional: Specify a version, or leave it blank to get the latest
+          version: 'latest' 
 
       - name: Build Web Application
         # GitHub Pages serves your site at NeuroSumbaD.github.io/izhikevich-gui/
