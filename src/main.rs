@@ -131,7 +131,7 @@ impl eframe::App for NeuronApp {
                         // Content for the collapsing header
                         egui::ComboBox::from_label("Model Type")
                             .selected_text(if let izh::NeuralModel::FixedPoint { bit_width, q_width } = self.params.model {
-                                format!("Fixed Point Q{}.{}", bit_width, q_width).to_string()
+                                format!("Fixed Point Q{}.{}", bit_width-q_width, q_width).to_string()
                             } else {
                                 "Floating Point".to_string()
                             })
@@ -516,6 +516,13 @@ impl eframe::App for NeuronApp {
 
                         Plot::new("rate_curve_plot")
                             .legend(Legend::default())
+                            .label_formatter(|name, value| {
+                                if !name.is_empty() {
+                                    format!("{}: {:.3}, {:.3}", name, value.x, value.y)
+                                } else {
+                                    "".to_owned()
+                                }
+                            })
                             .x_axis_label("normalized input")
                             .y_axis_label("firing rate (Hz)")
                             .show(ui, |plot_ui| {
@@ -550,15 +557,8 @@ impl NeuronApp {
             };
 
             let mut sweep_params = self.params.clone();
-            sweep_params.num_neurons = 1;
             sweep_params.duration = duration_ms;
-            sweep_params.exc_inputs = vec![input];
-
-            if let Some(noise_std_dev) = sweep_params.noise_std_devs.first().copied() {
-                sweep_params.noise_std_devs = vec![noise_std_dev];
-            } else {
-                sweep_params.noise_std_devs = vec![0.0];
-            }
+            sweep_params.exc_inputs[0] = input;
 
             let mut rng = SmallRng::from_seed(sweep_params.rng_seed);
             let simulation = LiveSimulation::new(&sweep_params, &mut rng);
