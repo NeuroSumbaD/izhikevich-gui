@@ -1,9 +1,11 @@
 # Izhikevich Neuron Visualizer
+This repository is a small interactive simulator for Izhikevich neuron models, with an emphasis on limited-precision arithmetic and fixed-point formats that resemble what you would implement in digital logic.
+
+[Click here](https://neurosumbad.github.io/izhikevich-gui/) to run the application directly in your browser.
 
 ![Description for screen readers](/assets/Screenshot.png)
 *Figure 1: Sample screenshot.*
 
-This repository is a small interactive simulator for Izhikevich neuron models, with an emphasis on limited-precision arithmetic and fixed-point formats that resemble what you would implement in digital logic.
 
 It is built as a desktop GUI in Rust using `eframe` and `egui_plot`, so you can tune model parameters, compare floating-point and fixed-point behavior, and watch the voltage and recovery-variable traces update in real time.
 
