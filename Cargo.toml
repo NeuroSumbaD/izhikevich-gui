@@ -10,3 +10,12 @@ image = "0.25.10"
 rand = "0.10.2"
 rand_distr = "0.6.0"
 serde = { version = "1.0.228", features = ["derive"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# This forces the getrandom crate to turn on its browser capabilities
+getrandom = { version = "0.4.3", features = ["wasm_js"] }
+# Add these required dependencies for web bindings and element manipulation
+wasm-bindgen = "0.2.98"
+web-sys = { version = "0.3.77", features = ["HtmlCanvasElement"] }
+log = "0.4"
+wasm-bindgen-futures = "0.4.48"

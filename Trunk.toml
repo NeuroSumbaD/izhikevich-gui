@@ -3,6 +3,7 @@
 target = "index.html"
 # The folder where the compiled web assets will be generated
 dist = "dist"
+rustflags = ["-C", "target-cpu=generic"]
 
 [watch]
 # Folders Trunk should monitor for auto-reloading during development
@@ -15,4 +16,4 @@ port = 8089
 
 [clean]
 # Clean the distribution directory before building
-dist = true
+dist = "dist"

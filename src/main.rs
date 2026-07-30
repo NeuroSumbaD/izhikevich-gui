@@ -1,13 +1,15 @@
 use eframe::egui;
 use egui_plot::{Legend, Line, Plot, Points, PlotPoints};
 use std::time::Duration;
-use image::load_from_memory;
 use rand::{SeedableRng, rngs::SmallRng};
+#[cfg(not(target_arch = "wasm32"))]
+use image::load_from_memory;
 
 mod qmath;
 mod izh;
 use izh::{NeuronParams, LiveSimulation, RateEstimateMethod};
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result<()> {
 
     let icon_bytes = include_bytes!("../assets/icon.png");
@@ -31,6 +33,9 @@ fn main() -> eframe::Result<()> {
         Box::new(|cc| Ok(Box::new(NeuronApp::new(cc)))),
     )
 }
+
+#[cfg(target_arch = "wasm32")]
+fn main() {} // Dummy main required by cargo binary compilation profiles
 
 
 
@@ -595,15 +600,29 @@ where
 }
 
 #[cfg(target_arch = "wasm32")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub async fn start(canvas_id: &str) -> Result<(), wasm_bindgen::JsValue> {
+use wasm_bindgen::JsCast;
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(start)]
+pub async fn start() -> Result<(), wasm_bindgen::JsValue> {
+    // Connect to the browser's logging engine
+    eframe::WebLogger::init(log::LevelFilter::Debug).ok();
+
+    // Query the browser DOM directly to find the canvas element by its ID string
+    let window = web_sys::window().expect("No global window found");
+    let document = window.document().expect("No document found");
+    let canvas = document
+        .get_element_by_id("neuron_visualization")
+        .expect("Failed to find the canvas element")
+        .dyn_into::<web_sys::HtmlCanvasElement>()?;
+
     let web_options = eframe::WebOptions::default();
     
     eframe::WebRunner::new()
         .start(
-            canvas_id, // Links directly to "the_canvas_id" in your HTML
+            canvas, // Passes the actual HtmlCanvasElement object
             web_options,
-            Box::new(|cc| Ok(Box::new(MyEguiApp::new(cc)))),
+            Box::new(|cc| Ok(Box::new(NeuronApp::new(cc)))),
         )
         .await?;
         

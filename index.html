@@ -19,10 +19,9 @@
             display: block;
         }
     </style>
-    <!-- Trunk will compile your Rust code to WASM and inject the loader here -->
-    <link rel="rust" data-bin="neuron_visualization" data-wasm-output-name="neuron_visualization" />
+    <link data-trunk rel="rust" data-bin="neuron_visualization" data-wasm-output-name="neuron_visualization" />
 </head>
 <body>
-    <canvas id="the_canvas_id"></canvas>
+    <canvas id="neuron_visualization"></canvas>
 </body>
 </html>
