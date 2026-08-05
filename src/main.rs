@@ -64,8 +64,8 @@ struct RateCurveWindow {
 impl Default for RateCurveWindow {
     fn default() -> Self {
         Self {
-            simulation_duration_secs: 5.0,
-            point_count: 25,
+            simulation_duration_secs: 3.0,
+            point_count: 100,
             curve: Vec::new(),
         }
     }
@@ -567,23 +567,11 @@ impl NeuronApp {
 
             let mut rng = SmallRng::from_seed(sweep_params.rng_seed);
             let simulation = LiveSimulation::new(&sweep_params, &mut rng);
-            let spike_times = &simulation.spike_times[0];
-
-            let rate_hz = if spike_times.len() < 2 {
-                0.0
-            } else {
-                let isi_sum: f32 = spike_times
-                    .iter()
-                    .zip(spike_times.iter().skip(1))
-                    .map(|(previous, next)| next - previous)
-                    .sum();
-                let mean_isi = isi_sum / (spike_times.len() - 1) as f32;
-                if mean_isi > 0.0 {
-                    1000.0 / mean_isi
-                } else {
-                    0.0
-                }
-            };
+            
+            // extract the firing rate from the rate history instead of spike times
+            let mut rate_hz = simulation.rate_histories[0].iter().map(|x| x[1]).sum::<f32>(); // sum the rate values
+            rate_hz *= self.params.dt / duration_ms; // take the mean rate over the simulation duration
+            
 
             curve.push([input as f64, rate_hz as f64]);
         }
