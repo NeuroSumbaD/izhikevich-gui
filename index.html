@@ -21,8 +21,8 @@
     </style>
     
 <script type="module">
-import init, * as bindings from '/izhikevich-gui/neuron_visualization-bc879405d5a5227.js';
-const wasm = await init({ module_or_path: '/izhikevich-gui/neuron_visualization-bc879405d5a5227_bg.wasm' });
+import init, * as bindings from '/izhikevich-gui/neuron_visualization-9a42a9ea227ae9f8.js';
+const wasm = await init({ module_or_path: '/izhikevich-gui/neuron_visualization-9a42a9ea227ae9f8_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -31,7 +31,7 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>
-<link rel="modulepreload" href="/izhikevich-gui/neuron_visualization-bc879405d5a5227.js" crossorigin="anonymous" integrity="sha384-/l/2UlGBzflYBD5xKBRmkuEo6xl81PhPsF+TTboOHmYeEdaL1tsJz2qVc428fn5E"><link rel="preload" href="/izhikevich-gui/neuron_visualization-bc879405d5a5227_bg.wasm" crossorigin="anonymous" integrity="sha384-okI939gq78DtBrcJrS1mrXpsZl7YG7w+h2Zph9n6t3Vzc5PxCKVKTsNn/b5owyUt" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/izhikevich-gui/neuron_visualization-9a42a9ea227ae9f8.js" crossorigin="anonymous" integrity="sha384-cEdhvSCakMkPFKOOPbri0jWfzo32fwr1ipdY0hp1DNwiTGkeXrky7pK5lXU2VaP4"><link rel="preload" href="/izhikevich-gui/neuron_visualization-9a42a9ea227ae9f8_bg.wasm" crossorigin="anonymous" integrity="sha384-iVABdmQGk7qlJsElGuH2zB/Q4W1WsSfloyI9eWoUe4fyxQVgbRtHVc8s1GeS1Vh+" as="fetch" type="application/wasm"></head>
 <body>
     <canvas id="neuron_visualization"></canvas>
 </body>
